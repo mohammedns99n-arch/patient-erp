@@ -5,8 +5,33 @@ import { createClient } from "@/lib/supabase/server";
 import { getSessionProfile, permissions } from "@/lib/auth";
 import { getT, type TranslateFn } from "@/lib/i18n";
 import { getLocale } from "@/lib/i18n.server";
+import { applyPatientFilters, type PatientFilters } from "@/lib/patient-filters";
 
 export type SaveState = { error: string | null };
+
+const EXPORT_COLUMNS =
+  "case_id, patient_name, phone_number, age, case_type, treating_doctor, diagnosis, procedure_type, total_cost, materials_share, hospital_share, doctor_share, status_code, first_visit_date, last_updated";
+
+/**
+ * Fetch the FULL filtered patient set for Excel export (not just the current
+ * page). Runs the same filters as the list, without pagination.
+ */
+export async function fetchPatientsForExport(filters: PatientFilters) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { rows: [], error: "Not signed in." };
+
+  let query = supabase.from("patients").select(EXPORT_COLUMNS);
+  query = applyPatientFilters(query, filters);
+  query = query
+    .order("first_visit_date", { ascending: false })
+    .order("case_id", { ascending: false });
+
+  const { data, error } = await query;
+  return { rows: data ?? [], error: error ? error.message : null };
+}
 
 function num(formData: FormData, key: string): number {
   const raw = String(formData.get(key) ?? "").trim();

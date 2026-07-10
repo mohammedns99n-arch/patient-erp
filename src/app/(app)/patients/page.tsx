@@ -4,18 +4,17 @@ import { createClient } from "@/lib/supabase/server";
 import { CASE_TYPES, STATUS_CODES } from "@/lib/constants";
 import { getT, statusLabel, caseTypeLabel } from "@/lib/i18n";
 import { getLocale } from "@/lib/i18n.server";
+import { applyPatientFilters, hasAnyFilter, filtersToQuery, type PatientFilters } from "@/lib/patient-filters";
 import PatientTable, { type PatientRow } from "./patient-table";
-import ExportButton, { type ExportRow } from "./export-button";
+import ExportButton from "./export-button";
 
-type Search = {
-  q?: string;
-  doctor?: string;
-  status?: string;
-  case_type?: string;
-  from?: string;
-  to?: string;
-  deleted?: string;
-};
+type Search = PatientFilters & { deleted?: string; page?: string };
+
+const PAGE_SIZE = 25;
+
+// Only the columns the table actually renders (lighter rows than the export).
+const LIST_COLUMNS =
+  "id, case_id, patient_name, phone_number, age, case_type, treating_doctor, diagnosis, total_cost, status_code, first_visit_date, last_updated";
 
 const controlCls =
   "rounded-lg border border-black/15 dark:border-white/15 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500";
@@ -33,58 +32,55 @@ export default async function PatientsPage({
   const sp = await searchParams;
   const supabase = await createClient();
 
-  // Distinct doctors for the filter dropdown (all rows, unfiltered).
-  const { data: docRows } = await supabase.from("patients").select("treating_doctor");
-  const doctors = Array.from(
-    new Set((docRows ?? []).map((d) => d.treating_doctor).filter(Boolean))
-  ).sort((a, b) => a.localeCompare(b));
+  const filters: PatientFilters = {
+    q: sp.q,
+    doctor: sp.doctor,
+    status: sp.status,
+    case_type: sp.case_type,
+    from: sp.from,
+    to: sp.to,
+  };
+  const page = Math.max(1, Number(sp.page) || 1);
+  const from = (page - 1) * PAGE_SIZE;
+  const to = from + PAGE_SIZE - 1;
 
-  // Build the filtered query.
-  let query = supabase
-    .from("patients")
-    .select(
-      "id, case_id, patient_name, phone_number, age, case_type, treating_doctor, diagnosis, procedure_type, total_cost, materials_share, hospital_share, doctor_share, status_code, first_visit_date, last_updated"
-    );
-
-  if (sp.status && sp.status !== "") query = query.eq("status_code", Number(sp.status));
-  if (sp.case_type) query = query.eq("case_type", sp.case_type);
-  if (sp.doctor) query = query.eq("treating_doctor", sp.doctor);
-  if (sp.from) query = query.gte("first_visit_date", sp.from);
-  if (sp.to) query = query.lte("first_visit_date", sp.to);
-  if (sp.q) {
-    // Strip characters that would break PostgREST's or() filter grammar.
-    const safe = sp.q.replace(/[,()]/g, " ").trim();
-    if (safe) {
-      query = query.or(
-        `patient_name.ilike.%${safe}%,treating_doctor.ilike.%${safe}%,phone_number.ilike.%${safe}%`
-      );
-    }
+  // Distinct doctors via RPC (falls back to a scan if the perf migration
+  // hasn't been run yet, so the page never breaks).
+  let doctors: string[] = [];
+  const docRpc = await supabase.rpc("distinct_doctors");
+  if (!docRpc.error && Array.isArray(docRpc.data)) {
+    doctors = (docRpc.data as { name: string }[]).map((d) => d.name).filter(Boolean);
+  } else {
+    const { data: docRows } = await supabase.from("patients").select("treating_doctor");
+    doctors = Array.from(
+      new Set((docRows ?? []).map((d) => d.treating_doctor).filter(Boolean))
+    ).sort((a, b) => a.localeCompare(b));
   }
 
+  // Filtered + paginated query, with an exact count for the pager.
+  let query = supabase.from("patients").select(LIST_COLUMNS, { count: "exact" });
+  query = applyPatientFilters(query, filters);
   query = query
     .order("first_visit_date", { ascending: false })
-    .order("case_id", { ascending: false });
+    .order("case_id", { ascending: false })
+    .range(from, to);
 
-  const { data, error } = await query;
+  const { data, error, count } = await query;
   const rows = (data ?? []) as PatientRow[];
-  const exportRows = (data ?? []) as unknown as ExportRow[];
-
-  const hasFilters = Boolean(
-    sp.q || sp.doctor || sp.status || sp.case_type || sp.from || sp.to
-  );
+  const total = count ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const showingFrom = total === 0 ? 0 : from + 1;
+  const showingTo = Math.min(from + PAGE_SIZE, total);
 
   return (
     <main className="max-w-6xl mx-auto">
       <header className="mb-6 flex items-center justify-between gap-4">
-        <div>
-          <a href="/" className="text-sm text-black/60 dark:text-white/60 hover:underline">← {t("home")}</a>
-          <h1 className="text-xl font-bold mt-1">{t("patients")}</h1>
-        </div>
+        <h1 className="text-2xl font-bold">{t("patients")}</h1>
         <div className="flex items-center gap-2">
-          <ExportButton rows={exportRows} locale={locale} />
+          <ExportButton filters={filters} count={total} locale={locale} />
           <a
             href="/patients/new"
-            className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
+            className="rounded-lg bg-emerald-500 hover:bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white"
           >
             + {t("newPatient")}
           </a>
@@ -97,7 +93,7 @@ export default async function PatientsPage({
         </div>
       )}
 
-      {/* Filters */}
+      {/* Filters (submitting resets to page 1 since no page field is sent) */}
       <form method="get" action="/patients" className="mb-4 flex flex-wrap items-end gap-3">
         <div className="flex flex-col gap-1">
           <label htmlFor="q" className="text-xs text-black/60 dark:text-white/60">{t("searchLabel")}</label>
@@ -142,7 +138,7 @@ export default async function PatientsPage({
           <button type="submit" className="rounded-lg bg-black/80 dark:bg-white/90 dark:text-black text-white px-4 py-2 text-sm font-medium">
             {t("apply")}
           </button>
-          {hasFilters && (
+          {hasAnyFilter(filters) && (
             <a href="/patients" className="rounded-lg border border-black/15 dark:border-white/15 px-4 py-2 text-sm">
               {t("clear")}
             </a>
@@ -151,10 +147,27 @@ export default async function PatientsPage({
       </form>
 
       <p className="mb-3 text-sm text-black/60 dark:text-white/60">
-        {error ? `${t("errorWord")}: ${error.message}` : `${rows.length} ${t("patientsWord")}`}
+        {error
+          ? `${t("errorWord")}: ${error.message}`
+          : `${showingFrom}–${showingTo} / ${total} ${t("patientsWord")}`}
       </p>
 
       <PatientTable rows={rows} locale={locale} />
+
+      {totalPages > 1 && (
+        <nav className="mt-4 flex items-center justify-center gap-2 text-sm" aria-label="pagination">
+          <PagerLink disabled={page <= 1} href={`/patients${filtersToQuery(filters, page - 1)}`} label={`‹ ${t("prevPage")}`} />
+          <span className="px-3 text-black/60 dark:text-white/60 tabular-nums">{page} / {totalPages}</span>
+          <PagerLink disabled={page >= totalPages} href={`/patients${filtersToQuery(filters, page + 1)}`} label={`${t("nextPage")} ›`} />
+        </nav>
+      )}
     </main>
   );
+}
+
+function PagerLink({ disabled, href, label }: { disabled: boolean; href: string; label: string }) {
+  if (disabled) {
+    return <span className="rounded-lg border border-black/10 dark:border-white/10 px-3 py-1.5 text-black/30 dark:text-white/30 cursor-not-allowed">{label}</span>;
+  }
+  return <a href={href} className="rounded-lg border border-black/15 dark:border-white/15 px-3 py-1.5 hover:bg-black/5 dark:hover:bg-white/10">{label}</a>;
 }

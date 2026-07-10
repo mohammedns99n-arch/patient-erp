@@ -13,16 +13,108 @@ function iqd(n: number) {
 const cardCls =
   "rounded-2xl bg-white dark:bg-zinc-800 border border-black/5 dark:border-white/10 p-5 shadow-sm";
 
-/** Donut of patients-by-status using the circumference-100 trick. */
-function StatusDonut({
-  counts,
-  total,
-  centerLabel,
-}: {
-  counts: Record<number, number>;
+type Agg = {
   total: number;
-  centerLabel: string;
-}) {
+  statusCounts: Record<number, number>;
+  typeCounts: Record<string, number>;
+  doctors: [string, number][];
+  volume: Map<string, number[]>;
+  fin: Map<string, { billed: number; received: number }[]>;
+  billedTotal: number;
+  receivedTotal: number;
+};
+
+const blankMonths = () => Array.from({ length: 12 }, () => 0);
+const blankFin = () => Array.from({ length: 12 }, () => ({ billed: 0, received: 0 }));
+
+/** Parse the dashboard_summary() JSON into the shape the view renders. */
+function parseAgg(d: Record<string, unknown>): Agg {
+  const statusCounts: Record<number, number> = { 0: 0, 1: 0, 2: 0, 3: 0 };
+  const sc = (d.status_counts ?? {}) as Record<string, number>;
+  for (const k of Object.keys(sc)) statusCounts[Number(k)] = Number(sc[k]) || 0;
+
+  const typeCounts: Record<string, number> = { Medical: 0, Surgical: 0 };
+  const tc = (d.type_counts ?? {}) as Record<string, number>;
+  for (const k of Object.keys(tc)) typeCounts[k] = Number(tc[k]) || 0;
+
+  const doctors = ((d.doctors ?? []) as { name: string; n: number }[]).map(
+    (x) => [x.name, Number(x.n)] as [string, number]
+  );
+
+  const volume = new Map<string, number[]>();
+  for (const v of (d.volume ?? []) as { y: number; m: number; n: number }[]) {
+    const y = String(v.y);
+    if (!volume.has(y)) volume.set(y, blankMonths());
+    volume.get(y)![v.m - 1] = Number(v.n) || 0;
+  }
+
+  const fin = new Map<string, { billed: number; received: number }[]>();
+  for (const f of (d.fin ?? []) as { y: number; m: number; billed: number; received: number }[]) {
+    const y = String(f.y);
+    if (!fin.has(y)) fin.set(y, blankFin());
+    fin.get(y)![f.m - 1] = { billed: Number(f.billed) || 0, received: Number(f.received) || 0 };
+  }
+
+  return {
+    total: Number(d.total) || 0,
+    statusCounts,
+    typeCounts,
+    doctors,
+    volume,
+    fin,
+    billedTotal: Number(d.billed_total) || 0,
+    receivedTotal: Number(d.received_total) || 0,
+  };
+}
+
+/** Fallback aggregation if the perf migration (RPC) isn't present yet. */
+async function aggFromRows(supabase: Awaited<ReturnType<typeof createClient>>): Promise<Agg> {
+  const { data } = await supabase
+    .from("patients")
+    .select("status_code, case_type, treating_doctor, total_cost, first_visit_date");
+  const rows = (data ?? []) as {
+    status_code: number; case_type: string; treating_doctor: string;
+    total_cost: number | string | null; first_visit_date: string;
+  }[];
+
+  const statusCounts: Record<number, number> = { 0: 0, 1: 0, 2: 0, 3: 0 };
+  const typeCounts: Record<string, number> = { Medical: 0, Surgical: 0 };
+  const doctorCounts = new Map<string, number>();
+  const volume = new Map<string, number[]>();
+  const fin = new Map<string, { billed: number; received: number }[]>();
+  let billedTotal = 0;
+  let receivedTotal = 0;
+
+  for (const r of rows) {
+    statusCounts[r.status_code] = (statusCounts[r.status_code] ?? 0) + 1;
+    if (r.case_type in typeCounts) typeCounts[r.case_type] += 1;
+    if (r.treating_doctor) doctorCounts.set(r.treating_doctor, (doctorCounts.get(r.treating_doctor) ?? 0) + 1);
+    const y = (r.first_visit_date ?? "").slice(0, 4);
+    const m = Number((r.first_visit_date ?? "").slice(5, 7)) - 1;
+    const cost = Number(r.total_cost ?? 0) || 0;
+    if (y && m >= 0 && m <= 11) {
+      if (!volume.has(y)) volume.set(y, blankMonths());
+      volume.get(y)![m] += 1;
+      if (!fin.has(y)) fin.set(y, blankFin());
+      if (r.status_code === 2) fin.get(y)![m].billed += cost;
+      if (r.status_code === 3) fin.get(y)![m].received += cost;
+    }
+    if (r.status_code === 2) billedTotal += cost;
+    if (r.status_code === 3) receivedTotal += cost;
+  }
+  return {
+    total: rows.length,
+    statusCounts,
+    typeCounts,
+    doctors: Array.from(doctorCounts.entries()).sort((a, b) => b[1] - a[1]),
+    volume,
+    fin,
+    billedTotal,
+    receivedTotal,
+  };
+}
+
+function StatusDonut({ counts, total, centerLabel }: { counts: Record<number, number>; total: number; centerLabel: string }) {
   let acc = 0;
   const segments = STATUS_CODES.map((c) => {
     const value = counts[c] ?? 0;
@@ -31,7 +123,6 @@ function StatusDonut({
     acc += pct;
     return seg;
   });
-
   return (
     <div className="relative h-44 w-44 shrink-0">
       <svg viewBox="0 0 36 36" className="h-full w-full -rotate-90">
@@ -39,18 +130,7 @@ function StatusDonut({
         {total > 0 &&
           segments.map((s, i) =>
             s.pct > 0 ? (
-              <circle
-                key={i}
-                cx="18"
-                cy="18"
-                r="15.9155"
-                fill="none"
-                stroke={s.color}
-                strokeWidth="4"
-                strokeDasharray={`${s.pct} ${100 - s.pct}`}
-                strokeDashoffset={s.offset}
-                strokeLinecap="butt"
-              />
+              <circle key={i} cx="18" cy="18" r="15.9155" fill="none" stroke={s.color} strokeWidth="4" strokeDasharray={`${s.pct} ${100 - s.pct}`} strokeDashoffset={s.offset} strokeLinecap="butt" />
             ) : null
           )}
       </svg>
@@ -62,18 +142,6 @@ function StatusDonut({
   );
 }
 
-type Row = {
-  id: string;
-  case_id: number;
-  patient_name: string;
-  status_code: number;
-  case_type: string;
-  treating_doctor: string;
-  total_cost: number | string | null;
-  first_visit_date: string;
-  last_updated: string;
-};
-
 export default async function DashboardPage() {
   const profile = await getSessionProfile();
   if (!profile) redirect("/login");
@@ -82,50 +150,27 @@ export default async function DashboardPage() {
   const locale = await getLocale();
   const t = getT(locale);
   const supabase = await createClient();
-  const { data } = await supabase
+
+  // Aggregates in SQL (one round-trip); fall back to a scan if RPC is absent.
+  const summary = await supabase.rpc("dashboard_summary");
+  const agg =
+    !summary.error && summary.data
+      ? parseAgg(summary.data as Record<string, unknown>)
+      : await aggFromRows(supabase);
+
+  // Recent list: just the newest 5 rows, ordered in SQL.
+  const { data: recentData } = await supabase
     .from("patients")
-    .select(
-      "id, case_id, patient_name, status_code, case_type, treating_doctor, total_cost, first_visit_date, last_updated"
-    );
-  const rows = (data ?? []) as Row[];
+    .select("id, case_id, patient_name, status_code, last_updated")
+    .order("last_updated", { ascending: false })
+    .limit(5);
+  const recent = (recentData ?? []) as {
+    id: string; case_id: number; patient_name: string; status_code: number; last_updated: string;
+  }[];
 
-  const total = rows.length;
-  const statusCounts: Record<number, number> = { 0: 0, 1: 0, 2: 0, 3: 0 };
-  const typeCounts: Record<string, number> = { Medical: 0, Surgical: 0 };
-  const doctorCounts = new Map<string, number>();
-  const volume = new Map<string, number[]>();
-  const fin = new Map<string, { billed: number; received: number }[]>();
-  let billedTotal = 0;
-  let receivedTotal = 0;
-
-  const blankMonths = () => Array.from({ length: 12 }, () => 0);
-  const blankFin = () => Array.from({ length: 12 }, () => ({ billed: 0, received: 0 }));
-
-  for (const r of rows) {
-    statusCounts[r.status_code] = (statusCounts[r.status_code] ?? 0) + 1;
-    if (r.case_type in typeCounts) typeCounts[r.case_type] += 1;
-    if (r.treating_doctor) doctorCounts.set(r.treating_doctor, (doctorCounts.get(r.treating_doctor) ?? 0) + 1);
-
-    const year = (r.first_visit_date ?? "").slice(0, 4);
-    const month = Number((r.first_visit_date ?? "").slice(5, 7)) - 1;
-    const cost = Number(r.total_cost ?? 0) || 0;
-    if (year && month >= 0 && month <= 11) {
-      if (!volume.has(year)) volume.set(year, blankMonths());
-      volume.get(year)![month] += 1;
-      if (!fin.has(year)) fin.set(year, blankFin());
-      if (r.status_code === 2) fin.get(year)![month].billed += cost;
-      if (r.status_code === 3) fin.get(year)![month].received += cost;
-    }
-    if (r.status_code === 2) billedTotal += cost;
-    if (r.status_code === 3) receivedTotal += cost;
-  }
+  const { total, statusCounts, typeCounts, doctors, volume, fin, billedTotal, receivedTotal } = agg;
   const outstandingTotal = billedTotal - receivedTotal;
-  const doctors = Array.from(doctorCounts.entries()).sort((a, b) => b[1] - a[1]);
   const years = Array.from(new Set([...volume.keys(), ...fin.keys()])).sort((a, b) => b.localeCompare(a));
-
-  const recent = [...rows]
-    .sort((a, b) => (b.last_updated ?? "").localeCompare(a.last_updated ?? ""))
-    .slice(0, 5);
 
   return (
     <main className="max-w-6xl mx-auto">
@@ -142,15 +187,9 @@ export default async function DashboardPage() {
         </p>
       )}
 
-      {/* Status shortcut cards (folder-style) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         {STATUS_CODES.map((c) => (
-          <a
-            key={c}
-            href={`/patients?status=${c}`}
-            className="relative rounded-2xl p-5 text-white shadow-sm hover:brightness-105 transition"
-            style={{ backgroundColor: STATUS[c].strong }}
-          >
+          <a key={c} href={`/patients?status=${c}`} className="relative rounded-2xl p-5 text-white shadow-sm hover:brightness-105 transition" style={{ backgroundColor: STATUS[c].strong }}>
             <div className="text-xs font-semibold text-white/70">0{c + 1}</div>
             <div className="mt-6 text-3xl font-bold tabular-nums">{statusCounts[c] ?? 0}</div>
             <div className="text-sm text-white/90">{statusLabel(locale, c)}</div>
@@ -158,7 +197,6 @@ export default async function DashboardPage() {
         ))}
       </div>
 
-      {/* Donut + recently updated */}
       <div className="grid lg:grid-cols-2 gap-4 mb-6">
         <section className={cardCls}>
           <h2 className="font-bold mb-4">{t("patientsByStatus")}</h2>
@@ -199,7 +237,6 @@ export default async function DashboardPage() {
         </section>
       </div>
 
-      {/* Case type + doctors */}
       <div className="grid lg:grid-cols-2 gap-4 mb-6">
         <section className={cardCls}>
           <h2 className="font-bold mb-3">{t("byCaseType")}</h2>
@@ -230,7 +267,6 @@ export default async function DashboardPage() {
         </section>
       </div>
 
-      {/* Monthly patient volume */}
       {years.length > 0 && (
         <section className={`${cardCls} mb-6`}>
           <h2 className="font-bold mb-3">{t("monthlyVolume")}</h2>
@@ -269,7 +305,6 @@ export default async function DashboardPage() {
         </section>
       )}
 
-      {/* Financial summary — gated */}
       {perms.canViewFinancials ? (
         <section id="financials" className={`${cardCls} mb-6`}>
           <h2 className="font-bold mb-3">{t("financialSummary")}</h2>

@@ -1,9 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { STATUS, type StatusCode } from "@/lib/constants";
+import { STATUS } from "@/lib/constants";
 import { formatDateTime, todayInBaghdad } from "@/lib/dates";
 import { getT, type Locale } from "@/lib/i18n";
+import { fetchPatientsForExport } from "./actions";
+import type { PatientFilters } from "@/lib/patient-filters";
 
 export type ExportRow = {
   case_id: number;
@@ -25,15 +27,30 @@ export type ExportRow = {
 
 const n = (v: number | string | null) => Number(v ?? 0) || 0;
 
-export default function ExportButton({ rows, locale }: { rows: ExportRow[]; locale: Locale }) {
+export default function ExportButton({
+  filters,
+  count,
+  locale,
+}: {
+  filters: PatientFilters;
+  count: number;
+  locale: Locale;
+}) {
   const [busy, setBusy] = useState(false);
   const t = getT(locale);
 
   async function onExport() {
-    if (rows.length === 0 || busy) return;
+    if (count === 0 || busy) return;
     setBusy(true);
     try {
-      // Load SheetJS only when the user actually exports.
+      // Fetch the FULL filtered set (not just the visible page), then load
+      // SheetJS lazily and build the workbook.
+      const res = await fetchPatientsForExport(filters);
+      if (res.error) {
+        alert(res.error);
+        return;
+      }
+      const rows = res.rows as ExportRow[];
       const XLSX = await import("xlsx");
 
       const data = rows.map((r) => ({
@@ -50,7 +67,7 @@ export default function ExportButton({ rows, locale }: { rows: ExportRow[]; loca
         "Hospital Share (IQD)": n(r.hospital_share),
         "Doctor Share (IQD)": n(r.doctor_share),
         "Status Code": r.status_code,
-        Status: STATUS[(r.status_code as StatusCode) ?? 0].label,
+        Status: STATUS[(r.status_code as 0 | 1 | 2 | 3) ?? 0].label,
         "First Visit Date": r.first_visit_date,
         "Last Updated (Baghdad)": formatDateTime(r.last_updated),
       }));
@@ -75,11 +92,11 @@ export default function ExportButton({ rows, locale }: { rows: ExportRow[]; loca
     <button
       type="button"
       onClick={onExport}
-      disabled={rows.length === 0 || busy}
-      title={rows.length === 0 ? t("noRowsToExport") : t("exportTitle")}
+      disabled={count === 0 || busy}
+      title={count === 0 ? t("noRowsToExport") : t("exportTitle")}
       className="rounded-lg border border-black/15 dark:border-white/15 px-4 py-2.5 text-sm font-medium hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-50"
     >
-      {busy ? t("exporting") : `${t("exportExcel")} (${rows.length})`}
+      {busy ? t("exporting") : `${t("exportExcel")} (${count})`}
     </button>
   );
 }
