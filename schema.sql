@@ -122,6 +122,18 @@ create policy profiles_admin_insert on public.profiles
 
 -- patients: all authenticated users can read + create + edit.
 -- Only admins (or staff granted can_delete) may delete.
+--
+-- SECURITY NOTE (reviewed 2026-07-10, decision: accept):
+-- This policy exposes ALL columns — including total_cost and the share
+-- fields — to every authenticated user. RLS is row-level and cannot hide
+-- individual columns per-user, so `can_view_financials` is enforced only in
+-- the UI (dashboard aggregate totals + doctor money page). Per-case financials
+-- are intentionally visible to staff because staff enter those numbers on the
+-- intake form and the case list shows the per-case Total. A logged-in staff
+-- user can therefore read total_cost/shares directly via the REST API. If this
+-- is ever unacceptable, move the money columns to a separate `patient_financials`
+-- table with its own RLS gated on a can_view_financials() function. See SECURITY.md.
+-- Anonymous (unauthenticated) access is fully blocked — this policy is `to authenticated`.
 drop policy if exists patients_select on public.patients;
 create policy patients_select on public.patients
   for select to authenticated using (true);
