@@ -2,7 +2,14 @@ import { NextResponse, type NextRequest } from "next/server";
 import { updateSession } from "@/lib/supabase/middleware";
 
 /**
- * Next.js 16 "proxy" convention (formerly "middleware").
+ * Auth middleware (Edge runtime).
+ *
+ * NOTE: Next.js 16 renamed this convention to `proxy.ts` (Node.js runtime),
+ * but the OpenNext Cloudflare adapter does not yet support Node.js middleware
+ * (opennextjs/opennextjs-cloudflare#962). We use the legacy `middleware.ts`
+ * convention so it runs on the Edge runtime, which Cloudflare Workers supports.
+ * The logic only uses edge-compatible APIs (NextResponse + @supabase/ssr).
+ *
  * - Refreshes the Supabase auth session on every request.
  * - Redirects unauthenticated users to /login.
  * - Redirects already-signed-in users away from /login.
@@ -17,7 +24,7 @@ function isPublic(pathname: string) {
   );
 }
 
-export async function proxy(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { supabaseResponse, user } = await updateSession(request);
   const { pathname } = request.nextUrl;
 
