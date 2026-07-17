@@ -199,6 +199,39 @@ const en = {
   usersFooter:
     "New accounts are created in the Supabase dashboard (Authentication → Users); they appear here automatically as staff with no extra permissions.",
   cantChangeOwnRole: "You can't change your own role",
+  colViewStatistics: "View statistics",
+
+  // Sidebar + new pages
+  statistics: "Statistics",
+  financials: "Financials",
+  showDetails: "Show details",
+  showLess: "Show less",
+
+  // Statistics page
+  statsDesc: "Trends across your patient cases. Tap a card to open its chart.",
+  statSurgicalVsMedical: "Surgical vs Medical",
+  statPatientsPerMonth: "Patients per month",
+  statYoY: "Year-over-year",
+  statPerDoctor: "Patients per doctor",
+  statByStatus: "Patients by status",
+  statNoData: "Not enough data yet.",
+  thisYear: "this year",
+  topDoctor: "Top doctor",
+  vsPrevYear: "vs previous year",
+
+  // Financials page
+  finDesc: "Ministry billing and collection overview.",
+  finOutstanding: "Outstanding with the Ministry",
+  finOutstandingDesc: "Billed (invoice submitted) but not yet received.",
+  finCollectionRate: "Collection rate",
+  finCollectionDesc: "Submitted invoices that have been received.",
+  finRevenuePerMonth: "Revenue received per month",
+  finOldestPending: "Oldest pending invoices",
+  finOldestPendingDesc: "Submitted invoices (status 2), longest-waiting first.",
+  colDaysWaiting: "Days waiting",
+  daysWord: "days",
+  invoicesWord: "invoices",
+  noPendingInvoices: "No pending invoices — nothing awaiting payment.",
 
   // Server-action errors
   errRequiredFields: "Please fill in all required fields (marked with *).",
@@ -384,6 +417,36 @@ const ar: Record<Keys, string> = {
   usersFooter:
     "تُنشأ الحسابات الجديدة من لوحة Supabase (Authentication ← Users)؛ وتظهر هنا تلقائياً كموظف بدون صلاحيات إضافية.",
   cantChangeOwnRole: "لا يمكنك تغيير دورك",
+  colViewStatistics: "عرض الإحصائيات",
+
+  statistics: "الإحصائيات",
+  financials: "الأمور المالية",
+  showDetails: "عرض التفاصيل",
+  showLess: "عرض أقل",
+
+  statsDesc: "اتجاهات حالات المرضى. اضغط على البطاقة لعرض مخططها.",
+  statSurgicalVsMedical: "جراحي مقابل طبّي",
+  statPatientsPerMonth: "المرضى شهرياً",
+  statYoY: "مقارنة سنوية",
+  statPerDoctor: "المرضى حسب الطبيب",
+  statByStatus: "المرضى حسب الحالة",
+  statNoData: "لا توجد بيانات كافية بعد.",
+  thisYear: "هذه السنة",
+  topDoctor: "الأكثر مرضى",
+  vsPrevYear: "مقارنة بالسنة السابقة",
+
+  finDesc: "نظرة عامة على الفوترة والتحصيل مع الوزارة.",
+  finOutstanding: "المستحق لدى الوزارة",
+  finOutstandingDesc: "مفوتر (تم تقديم الفاتورة) ولم يُستلم بعد.",
+  finCollectionRate: "نسبة التحصيل",
+  finCollectionDesc: "الفواتير المقدَّمة التي تم استلامها.",
+  finRevenuePerMonth: "الإيراد المستلم شهرياً",
+  finOldestPending: "أقدم الفواتير المعلّقة",
+  finOldestPendingDesc: "الفواتير المقدَّمة (الحالة 2)، الأطول انتظاراً أولاً.",
+  colDaysWaiting: "أيام الانتظار",
+  daysWord: "يوم",
+  invoicesWord: "فواتير",
+  noPendingInvoices: "لا توجد فواتير معلّقة — لا شيء بانتظار الدفع.",
 
   errRequiredFields: "يرجى تعبئة جميع الحقول المطلوبة (المميّزة بـ *).",
   errAge: "يجب أن يكون العمر رقماً صحيحاً بين 0 و150.",

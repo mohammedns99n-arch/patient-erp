@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 
 type Result = { error: string | null };
 
-const PERMISSION_FIELDS = ["can_view_financials", "can_delete"] as const;
+const PERMISSION_FIELDS = ["can_view_financials", "can_view_statistics", "can_delete"] as const;
 type PermissionField = (typeof PERMISSION_FIELDS)[number];
 
 async function requireAdmin() {

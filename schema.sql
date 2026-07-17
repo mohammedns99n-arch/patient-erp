@@ -12,6 +12,7 @@ create table if not exists public.profiles (
   full_name             text,
   role                  text not null default 'staff' check (role in ('admin','staff')),
   can_view_financials   boolean not null default false,
+  can_view_statistics   boolean not null default false,
   can_delete            boolean not null default false,
   created_at            timestamptz not null default now()
 );

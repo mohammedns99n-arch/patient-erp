@@ -8,6 +8,7 @@ export type Profile = {
   full_name: string | null;
   role: Role;
   can_view_financials: boolean;
+  can_view_statistics: boolean;
   can_delete: boolean;
 };
 
@@ -25,7 +26,7 @@ export async function getSessionProfile(): Promise<Profile | null> {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("id, email, full_name, role, can_view_financials, can_delete")
+    .select("id, email, full_name, role, can_view_financials, can_view_statistics, can_delete")
     .eq("id", user.id)
     .single();
 
@@ -37,6 +38,7 @@ export async function getSessionProfile(): Promise<Profile | null> {
       full_name: user.email ?? null,
       role: "staff",
       can_view_financials: false,
+      can_view_statistics: false,
       can_delete: false,
     };
   }
@@ -50,6 +52,7 @@ export function permissions(profile: Profile) {
   return {
     isAdmin,
     canViewFinancials: isAdmin || profile.can_view_financials,
+    canViewStatistics: isAdmin || profile.can_view_statistics,
     canDelete: isAdmin || profile.can_delete,
     canManageUsers: isAdmin,
   };

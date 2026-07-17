@@ -11,6 +11,7 @@ export type UserRow = {
   full_name: string | null;
   role: "admin" | "staff";
   can_view_financials: boolean;
+  can_view_statistics: boolean;
   can_delete: boolean;
 };
 
@@ -66,7 +67,7 @@ export default function UsersTable({
 
   function togglePermission(
     user: UserRow,
-    field: "can_view_financials" | "can_delete",
+    field: "can_view_financials" | "can_view_statistics" | "can_delete",
     value: boolean
   ) {
     const prev = user[field];
@@ -104,6 +105,7 @@ export default function UsersTable({
             <th className="text-start px-4 py-2 font-medium">{t("colUser")}</th>
             <th className="text-start px-4 py-2 font-medium">{t("colRole")}</th>
             <th className="text-center px-4 py-2 font-medium">{t("colViewFinancials")}</th>
+            <th className="text-center px-4 py-2 font-medium">{t("colViewStatistics")}</th>
             <th className="text-center px-4 py-2 font-medium">{t("colDeleteRecords")}</th>
           </tr>
         </thead>
@@ -113,6 +115,7 @@ export default function UsersTable({
             const isAdmin = u.role === "admin";
             // Admins implicitly have every permission.
             const viewFin = isAdmin || u.can_view_financials;
+            const viewStats = isAdmin || u.can_view_statistics;
             const canDel = isAdmin || u.can_delete;
             return (
               <tr key={u.id} className="border-t border-black/5 dark:border-white/5">
@@ -144,6 +147,16 @@ export default function UsersTable({
                       checked={viewFin}
                       disabled={isAdmin || pending}
                       onChange={(v) => togglePermission(u, "can_view_financials", v)}
+                    />
+                  </div>
+                </td>
+                <td className="px-4 py-3">
+                  <div className="flex justify-center">
+                    <Switch
+                      label={`Allow ${u.email ?? "user"} to view statistics`}
+                      checked={viewStats}
+                      disabled={isAdmin || pending}
+                      onChange={(v) => togglePermission(u, "can_view_statistics", v)}
                     />
                   </div>
                 </td>
