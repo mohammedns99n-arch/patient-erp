@@ -31,7 +31,7 @@ export function applyPatientFilters<T extends FilterableQuery<T>>(
     const safe = f.q.replace(/[,()]/g, " ").trim();
     if (safe) {
       query = query.or(
-        `patient_name.ilike.%${safe}%,treating_doctor.ilike.%${safe}%,phone_number.ilike.%${safe}%`
+        `patient_name.ilike.%${safe}%,treating_doctor.ilike.%${safe}%,phone_number.ilike.%${safe}%,patient_erp_id.ilike.%${safe}%`
       );
     }
   }

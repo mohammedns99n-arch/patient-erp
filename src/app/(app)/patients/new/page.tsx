@@ -1,4 +1,4 @@
-import { getSessionProfile } from "@/lib/auth";
+import { getSessionProfile, permissions } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { getT } from "@/lib/i18n";
 import { getLocale } from "@/lib/i18n.server";
@@ -12,6 +12,7 @@ export default async function NewPatientPage({
 }) {
   const profile = await getSessionProfile();
   if (!profile) redirect("/login");
+  const perms = permissions(profile);
 
   const locale = await getLocale();
   const t = getT(locale);
@@ -32,7 +33,12 @@ export default async function NewPatientPage({
         </div>
       )}
 
-      <PatientForm mode="create" action={createPatient} locale={locale} />
+      <PatientForm
+        mode="create"
+        action={createPatient}
+        locale={locale}
+        canViewFinancials={perms.canViewFinancials}
+      />
     </main>
   );
 }

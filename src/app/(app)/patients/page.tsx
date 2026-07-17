@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { getSessionProfile } from "@/lib/auth";
+import { getSessionProfile, permissions } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { CASE_TYPES, STATUS_CODES } from "@/lib/constants";
 import { getT, statusLabel, caseTypeLabel } from "@/lib/i18n";
@@ -14,7 +14,7 @@ const PAGE_SIZE = 25;
 
 // Only the columns the table actually renders (lighter rows than the export).
 const LIST_COLUMNS =
-  "id, case_id, patient_name, phone_number, age, case_type, treating_doctor, diagnosis, total_cost, status_code, first_visit_date, last_updated";
+  "id, case_id, patient_erp_id, patient_name, phone_number, age, case_type, treating_doctor, diagnosis, total_cost, status_code, first_visit_date, last_updated";
 
 const controlCls =
   "rounded-lg border border-black/15 dark:border-white/15 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500";
@@ -26,6 +26,7 @@ export default async function PatientsPage({
 }) {
   const profile = await getSessionProfile();
   if (!profile) redirect("/login");
+  const perms = permissions(profile);
 
   const locale = await getLocale();
   const t = getT(locale);
@@ -77,7 +78,7 @@ export default async function PatientsPage({
       <header className="mb-6 flex items-center justify-between gap-4">
         <h1 className="text-2xl font-bold">{t("patients")}</h1>
         <div className="flex items-center gap-2">
-          <ExportButton filters={filters} count={total} locale={locale} />
+          <ExportButton filters={filters} count={total} locale={locale} canViewFinancials={perms.canViewFinancials} />
           <a
             href="/patients/new"
             className="rounded-lg bg-emerald-500 hover:bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white"

@@ -10,6 +10,7 @@ import { updateStatus } from "./actions";
 export type PatientRow = {
   id: string;
   case_id: number;
+  patient_erp_id: string | null;
   patient_name: string;
   phone_number: string | null;
   age: number;
@@ -85,6 +86,15 @@ function getColumns(locale: Locale): Col[] {
   const t = getT(locale);
   return [
     { header: t("colCase"), cell: (r) => <span className="font-medium">#{r.case_id}</span> },
+    {
+      header: t("colErpId"),
+      cell: (r) =>
+        r.patient_erp_id ? (
+          <span dir="ltr" className="tabular-nums">{r.patient_erp_id}</span>
+        ) : (
+          <span className="text-black/30">—</span>
+        ),
+    },
     { header: t("colPatient"), cell: (r) => r.patient_name },
     {
       header: t("colPhone"),

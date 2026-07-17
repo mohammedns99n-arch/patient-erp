@@ -94,8 +94,10 @@ export default async function EditPatientPage({
         mode="edit"
         action={updatePatient}
         locale={locale}
+        canViewFinancials={perms.canViewFinancials}
         initial={{
           id: patient.id,
+          patient_erp_id: patient.patient_erp_id,
           patient_name: patient.patient_name,
           phone_number: patient.phone_number,
           age: patient.age,
@@ -108,6 +110,8 @@ export default async function EditPatientPage({
           materials_share: patient.materials_share,
           hospital_share: patient.hospital_share,
           doctor_share: patient.doctor_share,
+          revenue_total: patient.revenue_total,
+          revenue_patient_paid: patient.revenue_patient_paid,
           lab_investigations: patient.lab_investigations,
           imaging_studies: patient.imaging_studies,
           notes: patient.notes,

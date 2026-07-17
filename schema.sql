@@ -22,6 +22,7 @@ create table if not exists public.profiles (
 create table if not exists public.patients (
   id                 uuid primary key default gen_random_uuid(),
   case_id            bigint generated always as identity unique,   -- shown to staff
+  patient_erp_id     text,                                 -- manual ID typed by staff; required by the app on create, nullable for legacy rows, duplicates allowed
   patient_name       text    not null,
   phone_number       text,                                 -- optional; text (may have +964, leading zeros)
   age                integer not null,
@@ -33,6 +34,10 @@ create table if not exists public.patients (
   materials_share    numeric(14,2) not null default 0,
   hospital_share     numeric(14,2) not null default 0,
   doctor_share       numeric(14,2) not null default 0,
+  -- Revenue Collection: independent from the cost-share breakdown above.
+  revenue_total        numeric(14,2) not null default 0,
+  revenue_patient_paid numeric(14,2) not null default 0,   -- resolved amount (a "%" input is converted to an amount by the app)
+  revenue_insurance_due numeric(14,2) generated always as (revenue_total - revenue_patient_paid) stored,  -- always total − patient paid; never written directly
   status_code        integer not null default 0 check (status_code in (0,1,2,3)),
   first_visit_date   date        not null default (now() at time zone 'Asia/Baghdad')::date,  -- Baghdad-local date, set on create, not edited
   last_updated       timestamptz not null default now(),          -- auto on every edit
@@ -55,6 +60,7 @@ create extension if not exists pg_trgm;
 create index if not exists patients_name_trgm   on public.patients using gin (patient_name gin_trgm_ops);
 create index if not exists patients_doctor_trgm on public.patients using gin (treating_doctor gin_trgm_ops);
 create index if not exists patients_phone_trgm  on public.patients using gin (phone_number gin_trgm_ops);
+create index if not exists patients_erp_id_trgm on public.patients using gin (patient_erp_id gin_trgm_ops);
 
 -- ---------------------------------------------------------------------
 -- 3. Auto-update last_updated on every edit

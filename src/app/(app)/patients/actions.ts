@@ -6,11 +6,12 @@ import { getSessionProfile, permissions } from "@/lib/auth";
 import { getT, type TranslateFn } from "@/lib/i18n";
 import { getLocale } from "@/lib/i18n.server";
 import { applyPatientFilters, type PatientFilters } from "@/lib/patient-filters";
+import { resolvePatientPaid } from "@/lib/revenue";
 
 export type SaveState = { error: string | null };
 
 const EXPORT_COLUMNS =
-  "case_id, patient_name, phone_number, age, case_type, treating_doctor, diagnosis, procedure_type, total_cost, materials_share, hospital_share, doctor_share, status_code, first_visit_date, last_updated";
+  "case_id, patient_erp_id, patient_name, phone_number, age, case_type, treating_doctor, diagnosis, procedure_type, total_cost, materials_share, hospital_share, doctor_share, revenue_total, revenue_patient_paid, revenue_insurance_due, status_code, first_visit_date, last_updated";
 
 /**
  * Fetch the FULL filtered patient set for Excel export (not just the current
@@ -40,10 +41,23 @@ function num(formData: FormData, key: string): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-/** Shared validation + field extraction for the editable patient fields. */
-function readFields(formData: FormData, t: TranslateFn):
+/**
+ * Shared validation + field extraction for the editable patient fields.
+ *
+ * @param requireErpId   enforce that patient_erp_id is present (new records only).
+ * @param includeRevenue include the Revenue Collection fields. Only true when the
+ *   user can view financials — otherwise the fields are omitted entirely so that
+ *   a save by a non-financial user never overwrites existing revenue values.
+ *   revenue_insurance_due is a generated DB column and is never written here.
+ */
+function readFields(
+  formData: FormData,
+  t: TranslateFn,
+  { requireErpId, includeRevenue }: { requireErpId: boolean; includeRevenue: boolean }
+):
   | { ok: true; fields: Record<string, unknown> }
   | { ok: false; error: string } {
+  const patient_erp_id = String(formData.get("patient_erp_id") ?? "").trim();
   const patient_name = String(formData.get("patient_name") ?? "").trim();
   const ageRaw = String(formData.get("age") ?? "").trim();
   const case_type = String(formData.get("case_type") ?? "").trim();
@@ -62,6 +76,9 @@ function readFields(formData: FormData, t: TranslateFn):
   ) {
     return { ok: false, error: t("errRequiredFields") };
   }
+  if (requireErpId && !patient_erp_id) {
+    return { ok: false, error: t("errErpIdRequired") };
+  }
 
   const age = Number(ageRaw);
   if (!Number.isInteger(age) || age < 0 || age > 150) {
@@ -71,28 +88,38 @@ function readFields(formData: FormData, t: TranslateFn):
     return { ok: false, error: t("errCaseType") };
   }
 
-  return {
-    ok: true,
-    fields: {
-      patient_name,
-      phone_number: String(formData.get("phone_number") ?? "").trim() || null,
-      age,
-      case_type,
-      treating_doctor,
-      diagnosis,
-      procedure_type,
-      total_cost: num(formData, "total_cost"),
-      materials_share: num(formData, "materials_share"),
-      hospital_share: num(formData, "hospital_share"),
-      doctor_share: num(formData, "doctor_share"),
-      status_code: [0, 1, 2, 3].includes(status_code) ? status_code : 0,
-      lab_investigations:
-        String(formData.get("lab_investigations") ?? "").trim() || null,
-      imaging_studies:
-        String(formData.get("imaging_studies") ?? "").trim() || null,
-      notes: String(formData.get("notes") ?? "").trim() || null,
-    },
+  const fields: Record<string, unknown> = {
+    patient_erp_id: patient_erp_id || null,
+    patient_name,
+    phone_number: String(formData.get("phone_number") ?? "").trim() || null,
+    age,
+    case_type,
+    treating_doctor,
+    diagnosis,
+    procedure_type,
+    total_cost: num(formData, "total_cost"),
+    materials_share: num(formData, "materials_share"),
+    hospital_share: num(formData, "hospital_share"),
+    doctor_share: num(formData, "doctor_share"),
+    status_code: [0, 1, 2, 3].includes(status_code) ? status_code : 0,
+    lab_investigations:
+      String(formData.get("lab_investigations") ?? "").trim() || null,
+    imaging_studies:
+      String(formData.get("imaging_studies") ?? "").trim() || null,
+    notes: String(formData.get("notes") ?? "").trim() || null,
   };
+
+  if (includeRevenue) {
+    const revenue_total = num(formData, "revenue_total");
+    const revenue_patient_paid = resolvePatientPaid(
+      String(formData.get("revenue_patient_paid") ?? ""),
+      revenue_total
+    );
+    fields.revenue_total = revenue_total;
+    fields.revenue_patient_paid = revenue_patient_paid;
+  }
+
+  return { ok: true, fields };
 }
 
 export async function createPatient(
@@ -105,8 +132,14 @@ export async function createPatient(
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
+  const profile = await getSessionProfile();
+  const canViewFinancials = profile ? permissions(profile).canViewFinancials : false;
+
   const t = getT(await getLocale());
-  const parsed = readFields(formData, t);
+  const parsed = readFields(formData, t, {
+    requireErpId: true,
+    includeRevenue: canViewFinancials,
+  });
   if (!parsed.ok) return { error: parsed.error };
 
   const { data, error } = await supabase
@@ -176,8 +209,15 @@ export async function updatePatient(
   const id = String(formData.get("id") ?? "").trim();
   if (!id) return { error: "Missing patient id." };
 
+  const profile = await getSessionProfile();
+  const canViewFinancials = profile ? permissions(profile).canViewFinancials : false;
+
   const t = getT(await getLocale());
-  const parsed = readFields(formData, t);
+  // ERP ID is not required on edit (legacy rows may not have one yet).
+  const parsed = readFields(formData, t, {
+    requireErpId: false,
+    includeRevenue: canViewFinancials,
+  });
   if (!parsed.ok) return { error: parsed.error };
 
   // Note: first_visit_date, case_id, entered_by are intentionally NOT updated.
