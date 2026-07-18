@@ -9,7 +9,8 @@ import { formatDateTime } from "@/lib/dates";
 import { MonthlyDonut, MonthlyBreakdown } from "./financials-charts";
 import MonthlyCountTable, { type MonthRow } from "../monthly-count-table";
 import ProcessingTimeSection from "./processing-time";
-import { financialsMonthNames } from "./actions";
+import MoneyReceivedTable from "./money-received-table";
+import { financialsMonthNames, financialsReceivedMonthNames } from "./actions";
 
 const cardCls =
   "rounded-2xl bg-white dark:bg-zinc-800 border border-black/5 dark:border-white/10 p-5 shadow-sm";
@@ -103,6 +104,13 @@ export default async function FinancialsPage() {
         <h2 className="font-bold">{t("finProcessingTime")}</h2>
         <p className="text-sm text-black/60 dark:text-white/60 mb-4">{t("finProcessingDesc")}</p>
         <ProcessingTimeSection locale={locale} data={processing} />
+      </section>
+
+      {/* Money received by month — by PAYMENT date (distinct from invoice-date tables) */}
+      <section className={`${cardCls} mb-6`}>
+        <h2 className="font-bold">{t("finMoneyReceived")}</h2>
+        <p className="text-sm text-black/60 dark:text-white/60 mb-4">{t("finMoneyReceivedDesc")}</p>
+        <MoneyReceivedTable locale={locale} months={fin.receivedByMonth} fetchNames={financialsReceivedMonthNames} />
       </section>
 
       {/* Billing by month — donut coloured by paid/pending */}

@@ -255,6 +255,12 @@ const en = {
   statMonthlyStatus: "Monthly status counts",
   statMonthlyStatusDesc: "By first visit month. Click a count to see the patients.",
 
+  // Money received by month (by payment date) table
+  finMoneyReceived: "Money received by month",
+  finMoneyReceivedDesc: "By payment date — the month the money arrived. Click a count to see the patients.",
+  colAmountReceived: "Amount received",
+  colCases: "Cases",
+
   // Processing time
   finProcessingTime: "Processing time",
   finProcessingDesc: "Average days across the case lifecycle.",
@@ -504,6 +510,11 @@ const ar: Record<Keys, string> = {
   finMonthlyStatusDesc: "حسب شهر تقديم الفاتورة. اضغط على العدد لعرض المرضى.",
   statMonthlyStatus: "أعداد الحالات الشهرية",
   statMonthlyStatusDesc: "حسب شهر أول زيارة. اضغط على العدد لعرض المرضى.",
+
+  finMoneyReceived: "الأموال المستلمة شهرياً",
+  finMoneyReceivedDesc: "حسب تاريخ الدفع — الشهر الذي وصل فيه المبلغ. اضغط على العدد لعرض المرضى.",
+  colAmountReceived: "المبلغ المستلم",
+  colCases: "الحالات",
 
   finProcessingTime: "زمن المعالجة",
   finProcessingDesc: "متوسط الأيام عبر دورة حياة الحالة.",
