@@ -56,6 +56,9 @@ create index if not exists patients_case_type_idx   on public.patients(case_type
 create index if not exists patients_first_visit_idx on public.patients(first_visit_date);
 create index if not exists patients_last_updated_idx on public.patients(last_updated desc);
 create index if not exists patients_invoice_submitted_idx on public.patients(invoice_submitted_at);
+-- Composite index so the list ORDER BY (first_visit_date desc, case_id desc) is
+-- served straight from the index — no per-page sort as the table grows.
+create index if not exists patients_list_order_idx on public.patients(first_visit_date desc, case_id desc);
 
 -- Trigram indexes so the ILIKE '%term%' search box is index-backed
 -- (a plain btree cannot serve a leading-wildcard ILIKE).
@@ -229,6 +232,59 @@ language sql stable security invoker set search_path = public as $$
         from public.patients
         where first_visit_date is not null
         group by 1, 2) mm;
+$$;
+
+-- Doctor page aggregation (status counts + paid/expected shares + monthly),
+-- computed in SQL so totals are correct at any scale (never truncated).
+create or replace function public.doctor_summary(doc text)
+returns jsonb
+language sql stable security invoker set search_path = public as $$
+  select jsonb_build_object(
+    'total', (select count(*) from public.patients where treating_doctor = doc),
+    'status_counts', (
+      select coalesce(jsonb_object_agg(status_code::text, n), '{}'::jsonb)
+      from (select status_code, count(*) n from public.patients
+            where treating_doctor = doc group by status_code) s
+    ),
+    'paid', (
+      select jsonb_build_object(
+        'doctor_share',   coalesce(sum(doctor_share)   filter (where status_code = 3), 0),
+        'hospital_share', coalesce(sum(hospital_share) filter (where status_code = 3), 0),
+        'materials_share',coalesce(sum(materials_share)filter (where status_code = 3), 0),
+        'total_cost',     coalesce(sum(total_cost)     filter (where status_code = 3), 0))
+      from public.patients where treating_doctor = doc
+    ),
+    'expected', (
+      select jsonb_build_object(
+        'doctor_share',   coalesce(sum(doctor_share), 0),
+        'hospital_share', coalesce(sum(hospital_share), 0),
+        'materials_share',coalesce(sum(materials_share), 0),
+        'total_cost',     coalesce(sum(total_cost), 0))
+      from public.patients where treating_doctor = doc
+    ),
+    'monthly', (
+      select coalesce(jsonb_agg(jsonb_build_object(
+        'y', y, 'm', m,
+        'paid',     jsonb_build_object('doctor_share', pd, 'hospital_share', ph, 'materials_share', pm, 'total_cost', pt),
+        'expected', jsonb_build_object('doctor_share', ed, 'hospital_share', eh, 'materials_share', em, 'total_cost', et))
+        order by y desc, m), '[]'::jsonb)
+      from (
+        select extract(year from first_visit_date)::int y,
+               extract(month from first_visit_date)::int m,
+               coalesce(sum(doctor_share)   filter (where status_code = 3), 0) pd,
+               coalesce(sum(hospital_share) filter (where status_code = 3), 0) ph,
+               coalesce(sum(materials_share)filter (where status_code = 3), 0) pm,
+               coalesce(sum(total_cost)     filter (where status_code = 3), 0) pt,
+               coalesce(sum(doctor_share), 0)    ed,
+               coalesce(sum(hospital_share), 0)  eh,
+               coalesce(sum(materials_share), 0) em,
+               coalesce(sum(total_cost), 0)      et
+        from public.patients
+        where treating_doctor = doc and first_visit_date is not null
+        group by 1, 2
+      ) mm
+    )
+  );
 $$;
 
 -- ---------------------------------------------------------------------

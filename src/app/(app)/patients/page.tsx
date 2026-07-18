@@ -10,7 +10,7 @@ import ExportButton from "./export-button";
 
 type Search = PatientFilters & { deleted?: string; page?: string };
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE = 50;
 
 // Only the columns the table actually renders (lighter rows than the export).
 const LIST_COLUMNS =
