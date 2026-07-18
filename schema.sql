@@ -40,6 +40,7 @@ create table if not exists public.patients (
   revenue_patient_paid numeric(14,2) not null default 0,   -- resolved amount (a "%" input is converted to an amount by the app)
   revenue_insurance_due numeric(14,2) generated always as (revenue_total - revenue_patient_paid) stored,  -- always total − patient paid; never written directly
   status_code        integer not null default 0 check (status_code in (0,1,2,3)),
+  invoice_submitted_at timestamptz,                               -- auto-set the first time status reaches >= 2 (invoice submitted); never cleared
   first_visit_date   date        not null default (now() at time zone 'Asia/Baghdad')::date,  -- Baghdad-local date, set on create, not edited
   last_updated       timestamptz not null default now(),          -- auto on every edit
   entered_by         uuid references public.profiles(id),
@@ -54,6 +55,7 @@ create index if not exists patients_doctor_idx      on public.patients(treating_
 create index if not exists patients_case_type_idx   on public.patients(case_type);
 create index if not exists patients_first_visit_idx on public.patients(first_visit_date);
 create index if not exists patients_last_updated_idx on public.patients(last_updated desc);
+create index if not exists patients_invoice_submitted_idx on public.patients(invoice_submitted_at);
 
 -- Trigram indexes so the ILIKE '%term%' search box is index-backed
 -- (a plain btree cannot serve a leading-wildcard ILIKE).
@@ -78,6 +80,22 @@ drop trigger if exists trg_patients_last_updated on public.patients;
 create trigger trg_patients_last_updated
   before update on public.patients
   for each row execute function public.set_last_updated();
+
+-- Stamp invoice_submitted_at the first time a case reaches status >= 2.
+create or replace function public.set_invoice_submitted_at()
+returns trigger language plpgsql as $$
+begin
+  if new.status_code >= 2 and new.invoice_submitted_at is null then
+    new.invoice_submitted_at := now();
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_invoice_submitted_at on public.patients;
+create trigger trg_invoice_submitted_at
+  before insert or update on public.patients
+  for each row execute function public.set_invoice_submitted_at();
 
 -- ---------------------------------------------------------------------
 -- 4. Auto-create a profile row when a new auth user signs up
@@ -159,6 +177,34 @@ language sql stable security invoker set search_path = public as $$
     ),
     'billed_total', (select coalesce(sum(total_cost) filter (where status_code = 2), 0) from public.patients),
     'received_total', (select coalesce(sum(total_cost) filter (where status_code = 3), 0) from public.patients)
+  );
+$$;
+
+-- Financials page aggregation, grouped by invoice submission month
+-- (invoice_submitted_at), plus the headline totals.
+create or replace function public.financials_summary()
+returns jsonb
+language sql stable security invoker set search_path = public as $$
+  select jsonb_build_object(
+    'outstanding',      (select coalesce(sum(total_cost) filter (where status_code = 2), 0) from public.patients),
+    'amount_collected', (select coalesce(sum(total_cost) filter (where status_code = 3), 0) from public.patients),
+    'submitted_count',  (select count(*) from public.patients where status_code = 2),
+    'received_count',   (select count(*) from public.patients where status_code = 3),
+    'months', (
+      select coalesce(jsonb_agg(
+        jsonb_build_object('y', y, 'm', m, 'total_billed', total_billed,
+          'hospital_share', hospital_share, 'all_paid', all_paid, 'count', cnt)
+        order by y, m), '[]'::jsonb)
+      from (select extract(year from invoice_submitted_at)::int y,
+                   extract(month from invoice_submitted_at)::int m,
+                   coalesce(sum(total_cost), 0) total_billed,
+                   coalesce(sum(hospital_share), 0) hospital_share,
+                   bool_and(status_code = 3) all_paid,
+                   count(*) cnt
+            from public.patients
+            where invoice_submitted_at is not null
+            group by 1, 2) mm
+    )
   );
 $$;
 
