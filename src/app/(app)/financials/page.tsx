@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { getSessionProfile, permissions } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
-import { getT, monthName } from "@/lib/i18n";
+import { getT } from "@/lib/i18n";
 import { getLocale } from "@/lib/i18n.server";
 import { getFinancials, getProcessingTime } from "@/lib/financials-data";
 import { fmtMoney } from "@/lib/revenue";
@@ -9,7 +9,6 @@ import { formatDateTime } from "@/lib/dates";
 import { MonthlyDonut, MonthlyBreakdown } from "./financials-charts";
 import MonthlyCountTable, { type MonthRow } from "../monthly-count-table";
 import ProcessingTimeSection from "./processing-time";
-import { LineChart } from "../charts";
 import { financialsMonthNames } from "./actions";
 
 const cardCls =
@@ -34,10 +33,6 @@ export default async function FinancialsPage() {
   const processing = await getProcessingTime(supabase);
   const denom = fin.submittedCount + fin.receivedCount;
   const collectionRate = denom ? Math.round((fin.receivedCount / denom) * 100) : null;
-
-  // Revenue received per month — by PAYMENT date (money in the month it arrived).
-  const recvLabels = fin.receivedByMonth.map((m) => `${monthName(locale, m.month)} ${m.year}`);
-  const recvSeries = [{ name: t("finRevenueReceived"), color: "#10b981", points: fin.receivedByMonth.map((m) => m.received) }];
 
   // Monthly status-count table rows (by invoice submission month; statuses 2 & 3).
   const monthCountRows: MonthRow[] = fin.months.map((m) => ({
@@ -108,17 +103,6 @@ export default async function FinancialsPage() {
         <h2 className="font-bold">{t("finProcessingTime")}</h2>
         <p className="text-sm text-black/60 dark:text-white/60 mb-4">{t("finProcessingDesc")}</p>
         <ProcessingTimeSection locale={locale} data={processing} />
-      </section>
-
-      {/* Revenue received per month — by payment date */}
-      <section className={`${cardCls} mb-6`}>
-        <h2 className="font-bold">{t("finRevenueReceived")}</h2>
-        <p className="text-sm text-black/60 dark:text-white/60 mb-4">{t("finRevenueReceivedDesc")}</p>
-        {fin.receivedByMonth.length > 0 ? (
-          <LineChart xLabels={recvLabels} series={recvSeries} formatY={(n) => fmtMoney(n)} />
-        ) : (
-          <p className="text-sm text-black/50 dark:text-white/50">{t("statNoData")}</p>
-        )}
       </section>
 
       {/* Billing by month — donut coloured by paid/pending */}

@@ -228,16 +228,6 @@ language sql stable security invoker set search_path = public as $$
             from public.patients
             where invoice_submitted_at is not null
             group by 1, 2) mm
-    ),
-    'received_by_month', (
-      select coalesce(jsonb_agg(
-        jsonb_build_object('y', y, 'm', m, 'received', received) order by y, m), '[]'::jsonb)
-      from (select extract(year  from (payment_received_at at time zone 'Asia/Baghdad'))::int y,
-                   extract(month from (payment_received_at at time zone 'Asia/Baghdad'))::int m,
-                   coalesce(sum(total_cost), 0) received
-            from public.patients
-            where status_code = 3 and payment_received_at is not null
-            group by 1, 2) rm
     )
   );
 $$;
