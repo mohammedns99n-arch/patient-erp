@@ -143,3 +143,46 @@ export async function getAggregate(
     ? parseAgg(summary.data as Record<string, unknown>)
     : aggFromRows(supabase);
 }
+
+/** One month's per-status patient counts, grouped by first_visit_date. */
+export type MonthlyStatus = {
+  key: string; // "YYYY-MM"
+  year: number;
+  month: number; // 0-11
+  total: number;
+  counts: Record<number, number>; // status -> count
+};
+
+/** Monthly per-status counts by first visit date (Statistics table). */
+export async function getMonthlyStatusByFirstVisit(
+  supabase: Awaited<ReturnType<typeof createClient>>
+): Promise<MonthlyStatus[]> {
+  const res = await supabase.rpc("statistics_monthly");
+  if (!res.error && Array.isArray(res.data)) {
+    return (res.data as { y: number; m: number; total: number; s0: number; s1: number; s2: number; s3: number }[])
+      .map((r) => ({
+        key: `${r.y}-${String(r.m).padStart(2, "0")}`,
+        year: r.y,
+        month: r.m - 1,
+        total: Number(r.total) || 0,
+        counts: { 0: Number(r.s0) || 0, 1: Number(r.s1) || 0, 2: Number(r.s2) || 0, 3: Number(r.s3) || 0 },
+      }))
+      .sort((a, b) => a.key.localeCompare(b.key));
+  }
+
+  // Fallback scan (dev only, if the RPC isn't present).
+  const { data } = await supabase.from("patients").select("status_code, first_visit_date");
+  const rows = (data ?? []) as { status_code: number; first_visit_date: string }[];
+  const byMonth = new Map<string, MonthlyStatus>();
+  for (const r of rows) {
+    const y = Number((r.first_visit_date ?? "").slice(0, 4));
+    const m = Number((r.first_visit_date ?? "").slice(5, 7)) - 1;
+    if (!y || m < 0 || m > 11) continue;
+    const key = `${y}-${String(m + 1).padStart(2, "0")}`;
+    const cur = byMonth.get(key) ?? { key, year: y, month: m, total: 0, counts: { 0: 0, 1: 0, 2: 0, 3: 0 } };
+    cur.total += 1;
+    cur.counts[r.status_code] = (cur.counts[r.status_code] ?? 0) + 1;
+    byMonth.set(key, cur);
+  }
+  return Array.from(byMonth.values()).sort((a, b) => a.key.localeCompare(b.key));
+}

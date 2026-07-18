@@ -3,8 +3,13 @@ import { getSessionProfile, permissions } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { getT } from "@/lib/i18n";
 import { getLocale } from "@/lib/i18n.server";
-import { getAggregate } from "@/lib/dashboard-data";
+import { getAggregate, getMonthlyStatusByFirstVisit } from "@/lib/dashboard-data";
 import StatsGrid, { type StatsData } from "./stats-grid";
+import MonthlyCountTable, { type MonthRow } from "../monthly-count-table";
+import { statisticsMonthNames } from "./actions";
+
+const cardCls =
+  "rounded-2xl bg-white dark:bg-zinc-800 border border-black/5 dark:border-white/10 p-5 shadow-sm";
 
 export default async function StatisticsPage() {
   const profile = await getSessionProfile();
@@ -26,6 +31,15 @@ export default async function StatisticsPage() {
     volumeByYear: agg.volumeByYear,
   };
 
+  // Monthly status-count table (by first visit month; all statuses, no colors).
+  const monthCountRows: MonthRow[] = (await getMonthlyStatusByFirstVisit(supabase)).map((m) => ({
+    key: m.key,
+    year: m.year,
+    month: m.month,
+    total: m.total,
+    counts: m.counts,
+  }));
+
   return (
     <main className="max-w-6xl mx-auto">
       <header className="mb-6">
@@ -34,6 +48,19 @@ export default async function StatisticsPage() {
       </header>
 
       <StatsGrid locale={locale} data={data} />
+
+      {/* Monthly status counts (all statuses), by first visit month */}
+      <section className={`${cardCls} mt-4`}>
+        <h2 className="font-bold">{t("statMonthlyStatus")}</h2>
+        <p className="text-sm text-black/60 dark:text-white/60 mb-4">{t("statMonthlyStatusDesc")}</p>
+        <MonthlyCountTable
+          locale={locale}
+          months={monthCountRows}
+          statuses={[0, 1, 2, 3]}
+          colored={false}
+          fetchNames={statisticsMonthNames}
+        />
+      </section>
     </main>
   );
 }

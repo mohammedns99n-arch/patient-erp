@@ -245,6 +245,16 @@ const en = {
   invoicesWord: "invoices",
   noPendingInvoices: "No invoices have been pending for more than a month.",
 
+  // Monthly status-count tables (Financials + Statistics)
+  monthLabel: "Month",
+  totalCountCol: "Total",
+  noPatientsInStatus: "No patients in this status.",
+  loadingWord: "Loading…",
+  finMonthlyStatus: "Monthly status counts",
+  finMonthlyStatusDesc: "By invoice submission month. Click a count to see the patients.",
+  statMonthlyStatus: "Monthly status counts",
+  statMonthlyStatusDesc: "By first visit month. Click a count to see the patients.",
+
   // Server-action errors
   errRequiredFields: "Please fill in all required fields (marked with *).",
   errAge: "Age must be a whole number between 0 and 150.",
@@ -471,6 +481,15 @@ const ar: Record<Keys, string> = {
   monthWord: "شهر",
   invoicesWord: "فواتير",
   noPendingInvoices: "لا توجد فواتير معلّقة لأكثر من شهر.",
+
+  monthLabel: "الشهر",
+  totalCountCol: "الإجمالي",
+  noPatientsInStatus: "لا يوجد مرضى في هذه الحالة.",
+  loadingWord: "جارٍ التحميل…",
+  finMonthlyStatus: "أعداد الحالات الشهرية",
+  finMonthlyStatusDesc: "حسب شهر تقديم الفاتورة. اضغط على العدد لعرض المرضى.",
+  statMonthlyStatus: "أعداد الحالات الشهرية",
+  statMonthlyStatusDesc: "حسب شهر أول زيارة. اضغط على العدد لعرض المرضى.",
 
   errRequiredFields: "يرجى تعبئة جميع الحقول المطلوبة (المميّزة بـ *).",
   errAge: "يجب أن يكون العمر رقماً صحيحاً بين 0 و150.",

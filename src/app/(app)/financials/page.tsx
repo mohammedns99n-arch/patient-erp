@@ -7,6 +7,8 @@ import { getFinancials } from "@/lib/financials-data";
 import { fmtMoney } from "@/lib/revenue";
 import { formatDateTime } from "@/lib/dates";
 import { MonthlyDonut, MonthlyBreakdown } from "./financials-charts";
+import MonthlyCountTable, { type MonthRow } from "../monthly-count-table";
+import { financialsMonthNames } from "./actions";
 
 const cardCls =
   "rounded-2xl bg-white dark:bg-zinc-800 border border-black/5 dark:border-white/10 p-5 shadow-sm";
@@ -29,6 +31,16 @@ export default async function FinancialsPage() {
   const fin = await getFinancials(supabase);
   const denom = fin.submittedCount + fin.receivedCount;
   const collectionRate = denom ? Math.round((fin.receivedCount / denom) * 100) : null;
+
+  // Monthly status-count table rows (by invoice submission month; statuses 2 & 3).
+  const monthCountRows: MonthRow[] = fin.months.map((m) => ({
+    key: m.key,
+    year: m.year,
+    month: m.month,
+    total: m.count,
+    counts: { 2: m.s2, 3: m.s3 },
+    allPaid: m.allPaid,
+  }));
 
   // Oldest pending (status 2) invoices submitted MORE THAN A MONTH AGO.
   const cutoff = new Date();
@@ -96,6 +108,19 @@ export default async function FinancialsPage() {
         <h2 className="font-bold">{t("finMonthlyBreakdown")}</h2>
         <p className="text-sm text-black/60 dark:text-white/60 mb-4">{t("finMonthlyBreakdownDesc")}</p>
         <MonthlyBreakdown locale={locale} months={fin.months} />
+      </section>
+
+      {/* Monthly status counts (2 & 3), colored picker, drill to patient names */}
+      <section className={`${cardCls} mb-6`}>
+        <h2 className="font-bold">{t("finMonthlyStatus")}</h2>
+        <p className="text-sm text-black/60 dark:text-white/60 mb-4">{t("finMonthlyStatusDesc")}</p>
+        <MonthlyCountTable
+          locale={locale}
+          months={monthCountRows}
+          statuses={[2, 3]}
+          colored
+          fetchNames={financialsMonthNames}
+        />
       </section>
 
       {/* Oldest pending invoices (> 1 month) */}

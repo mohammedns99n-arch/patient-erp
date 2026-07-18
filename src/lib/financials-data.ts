@@ -9,6 +9,8 @@ export type MonthFin = {
   hospitalShare: number; // sum(hospital_share)
   allPaid: boolean; // every case that month is status 3
   count: number;
+  s2: number; // count status 2 (submitted, pending)
+  s3: number; // count status 3 (received)
 };
 
 export type FinancialsData = {
@@ -24,7 +26,7 @@ const monthKey = (y: number, m: number) => `${y}-${String(m).padStart(2, "0")}`;
 
 function parse(d: Record<string, unknown>): FinancialsData {
   const months = ((d.months ?? []) as {
-    y: number; m: number; total_billed: number; hospital_share: number; all_paid: boolean; count: number;
+    y: number; m: number; total_billed: number; hospital_share: number; all_paid: boolean; count: number; s2: number; s3: number;
   }[]).map((r) => ({
     key: monthKey(r.y, r.m),
     year: r.y,
@@ -33,6 +35,8 @@ function parse(d: Record<string, unknown>): FinancialsData {
     hospitalShare: num(r.hospital_share),
     allPaid: Boolean(r.all_paid),
     count: num(r.count),
+    s2: num(r.s2),
+    s3: num(r.s3),
   }));
   months.sort((a, b) => a.key.localeCompare(b.key));
   return {
@@ -71,11 +75,13 @@ async function fromRows(
       const y = dt.getUTCFullYear();
       const m = dt.getUTCMonth();
       const key = monthKey(y, m + 1);
-      const cur = byMonth.get(key) ?? { key, year: y, month: m, totalBilled: 0, hospitalShare: 0, allPaid: true, count: 0 };
+      const cur = byMonth.get(key) ?? { key, year: y, month: m, totalBilled: 0, hospitalShare: 0, allPaid: true, count: 0, s2: 0, s3: 0 };
       cur.totalBilled += cost;
       cur.hospitalShare += num(r.hospital_share);
       cur.allPaid = cur.allPaid && r.status_code === 3;
       cur.count += 1;
+      if (r.status_code === 2) cur.s2 += 1;
+      if (r.status_code === 3) cur.s3 += 1;
       byMonth.set(key, cur);
     }
   }
