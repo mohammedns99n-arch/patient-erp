@@ -1,4 +1,5 @@
 import type { createClient } from "@/lib/supabase/server";
+import { baghdadYearMonth } from "@/lib/dates";
 
 /** One invoice-submission month (grouped by invoice_submitted_at). */
 export type MonthFin = {
@@ -34,14 +35,6 @@ export type FinancialsData = {
 
 const num = (v: unknown) => Number(v ?? 0) || 0;
 const monthKey = (y: number, m: number) => `${y}-${String(m).padStart(2, "0")}`;
-
-// Baghdad is a fixed UTC+3 (Iraq has no DST). Bucket a UTC timestamp by its
-// Baghdad calendar month so it matches the SQL (`at time zone 'Asia/Baghdad'`).
-const BAGHDAD_OFFSET_MS = 3 * 60 * 60 * 1000;
-function baghdadYM(iso: string): { y: number; m: number } {
-  const dt = new Date(Date.parse(iso) + BAGHDAD_OFFSET_MS);
-  return { y: dt.getUTCFullYear(), m: dt.getUTCMonth() };
-}
 
 function parse(d: Record<string, unknown>): FinancialsData {
   const months = ((d.months ?? []) as {
@@ -98,7 +91,7 @@ async function fromRows(
     if (r.status_code === 2) { outstanding += cost; submittedCount += 1; }
     if (r.status_code === 3) { amountCollected += cost; receivedCount += 1; }
     if (r.invoice_submitted_at) {
-      const { y, m } = baghdadYM(r.invoice_submitted_at);
+      const { year: y, month: m } = baghdadYearMonth(r.invoice_submitted_at);
       const key = monthKey(y, m + 1);
       const cur = byMonth.get(key) ?? { key, year: y, month: m, totalBilled: 0, hospitalShare: 0, allPaid: true, count: 0, s2: 0, s3: 0 };
       cur.totalBilled += cost;
@@ -110,7 +103,7 @@ async function fromRows(
       byMonth.set(key, cur);
     }
     if (r.status_code === 3 && r.payment_received_at) {
-      const { y, m } = baghdadYM(r.payment_received_at);
+      const { year: y, month: m } = baghdadYearMonth(r.payment_received_at);
       const key = monthKey(y, m + 1);
       const cur = recvByMonth.get(key) ?? { key, year: y, month: m, received: 0, hospitalShare: 0, count: 0 };
       cur.received += cost;

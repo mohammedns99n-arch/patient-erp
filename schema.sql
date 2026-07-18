@@ -4,6 +4,19 @@
 -- =====================================================================
 
 -- ---------------------------------------------------------------------
+-- 0. Timezone helper: the single source of truth for turning a UTC
+--    timestamp into its Asia/Baghdad calendar date. Every grouping,
+--    comparison and the first_visit_date default routes through this so
+--    the conversion can't drift between call sites. STABLE (not
+--    IMMUTABLE): named-timezone conversion depends on the tz database.
+-- ---------------------------------------------------------------------
+create or replace function public.baghdad_date(ts timestamptz)
+returns date
+language sql stable set search_path = public as $$
+  select (ts at time zone 'Asia/Baghdad')::date;
+$$;
+
+-- ---------------------------------------------------------------------
 -- 1. profiles: extends auth.users with role + per-user permissions
 -- ---------------------------------------------------------------------
 create table if not exists public.profiles (
@@ -42,7 +55,7 @@ create table if not exists public.patients (
   status_code        integer not null default 0 check (status_code in (0,1,2,3)),
   invoice_submitted_at timestamptz,                               -- auto-set the first time status reaches >= 2 (invoice submitted); never cleared
   payment_received_at  timestamptz,                               -- auto-set the first time status reaches 3 (payment received); never cleared
-  first_visit_date   date        not null default (now() at time zone 'Asia/Baghdad')::date,  -- Baghdad-local date, set on create, not edited
+  first_visit_date   date        not null default public.baghdad_date(now()),  -- Baghdad-local date, set on create, not edited
   last_updated       timestamptz not null default now(),          -- auto on every edit
   entered_by         uuid references public.profiles(id),
   lab_investigations text,
@@ -217,8 +230,8 @@ language sql stable security invoker set search_path = public as $$
           'hospital_share', hospital_share, 'all_paid', all_paid, 'count', cnt,
           's2', s2, 's3', s3)
         order by y, m), '[]'::jsonb)
-      from (select extract(year  from (invoice_submitted_at at time zone 'Asia/Baghdad'))::int y,
-                   extract(month from (invoice_submitted_at at time zone 'Asia/Baghdad'))::int m,
+      from (select extract(year  from public.baghdad_date(invoice_submitted_at))::int y,
+                   extract(month from public.baghdad_date(invoice_submitted_at))::int m,
                    coalesce(sum(total_cost), 0) total_billed,
                    coalesce(sum(hospital_share), 0) hospital_share,
                    bool_and(status_code = 3) all_paid,
@@ -234,8 +247,8 @@ language sql stable security invoker set search_path = public as $$
         jsonb_build_object('y', y, 'm', m, 'received', received,
           'hospital_share', hospital_share, 'count', cnt)
         order by y, m), '[]'::jsonb)
-      from (select extract(year  from (payment_received_at at time zone 'Asia/Baghdad'))::int y,
-                   extract(month from (payment_received_at at time zone 'Asia/Baghdad'))::int m,
+      from (select extract(year  from public.baghdad_date(payment_received_at))::int y,
+                   extract(month from public.baghdad_date(payment_received_at))::int m,
                    coalesce(sum(total_cost), 0) received,
                    coalesce(sum(hospital_share), 0) hospital_share,
                    count(*) cnt
@@ -257,8 +270,8 @@ language sql stable security invoker set search_path = public as $$
   with base as (
     select
       first_visit_date as fv,
-      (invoice_submitted_at at time zone 'Asia/Baghdad')::date as inv,
-      (payment_received_at  at time zone 'Asia/Baghdad')::date as pay
+      public.baghdad_date(invoice_submitted_at) as inv,
+      public.baghdad_date(payment_received_at)  as pay
     from public.patients
   )
   select jsonb_build_object(

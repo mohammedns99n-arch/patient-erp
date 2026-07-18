@@ -51,3 +51,58 @@ export function todayInBaghdad(): string {
   }).format(new Date());
   return parts; // en-CA yields YYYY-MM-DD
 }
+
+// ---------------------------------------------------------------------------
+// Baghdad calendar helpers for GROUPING and COMPARING UTC timestamps.
+// Route all timestamp→Baghdad date logic through these so it can't drift.
+//
+// Iraq observes a FIXED UTC+3 with no daylight saving, so Baghdad's offset is a
+// constant. (The display helpers above use Intl for robustness; these need the
+// numeric offset to compute month boundaries, which Intl can't express.)
+// ---------------------------------------------------------------------------
+const BAGHDAD_OFFSET_MS = 3 * 60 * 60 * 1000;
+
+const toMs = (value: string | Date) =>
+  value instanceof Date ? value.getTime() : Date.parse(value);
+
+/** Year (full) and 0-based month of a UTC instant, in the Baghdad calendar. */
+export function baghdadYearMonth(value: string | Date): { year: number; month: number } {
+  const d = new Date(toMs(value) + BAGHDAD_OFFSET_MS);
+  return { year: d.getUTCFullYear(), month: d.getUTCMonth() };
+}
+
+/** Baghdad calendar day index (days since epoch) of a UTC instant. */
+function baghdadDayNumber(value: string | Date): number {
+  return Math.floor((toMs(value) + BAGHDAD_OFFSET_MS) / 86_400_000);
+}
+
+/**
+ * Whole days between two instants, counted in Baghdad calendar days. Same
+ * Baghdad day → 0; never affected by the time of day. Clamped to >= 0.
+ */
+export function daysBetweenBaghdad(
+  from: string | Date,
+  to: string | Date = new Date()
+): number {
+  return Math.max(0, baghdadDayNumber(to) - baghdadDayNumber(from));
+}
+
+/**
+ * UTC ISO instants bounding a Baghdad calendar month [start, end). `month` is
+ * 0-based. Use to filter a timestamptz column by Baghdad month.
+ */
+export function baghdadMonthRangeUtc(year: number, month: number): { startISO: string; endISO: string } {
+  return {
+    startISO: new Date(Date.UTC(year, month, 1) - BAGHDAD_OFFSET_MS).toISOString(),
+    endISO: new Date(Date.UTC(year, month + 1, 1) - BAGHDAD_OFFSET_MS).toISOString(),
+  };
+}
+
+/**
+ * UTC ISO instant for Baghdad-local midnight `months` calendar months before
+ * today. Filtering `ts < cutoff` means "older than `months` Baghdad months".
+ */
+export function baghdadMonthsAgoCutoffISO(months: number): string {
+  const [y, m, d] = todayInBaghdad().split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1 - months, d) - BAGHDAD_OFFSET_MS).toISOString();
+}

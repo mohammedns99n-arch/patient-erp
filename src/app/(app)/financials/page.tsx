@@ -5,7 +5,7 @@ import { getT } from "@/lib/i18n";
 import { getLocale } from "@/lib/i18n.server";
 import { getFinancials, getProcessingTime } from "@/lib/financials-data";
 import { fmtMoney } from "@/lib/revenue";
-import { formatDateTime } from "@/lib/dates";
+import { formatDateTime, daysBetweenBaghdad, baghdadMonthsAgoCutoffISO } from "@/lib/dates";
 import { MonthlyDonut, MonthlyBreakdown } from "./financials-charts";
 import MonthlyCountTable, { type MonthRow } from "../monthly-count-table";
 import ProcessingTimeSection from "./processing-time";
@@ -14,12 +14,6 @@ import { financialsMonthNames, financialsReceivedMonthNames } from "./actions";
 
 const cardCls =
   "rounded-2xl bg-white dark:bg-zinc-800 border border-black/5 dark:border-white/10 p-5 shadow-sm";
-
-function daysSince(iso: string): number {
-  const then = Date.parse(iso);
-  if (Number.isNaN(then)) return 0;
-  return Math.max(0, Math.floor((Date.now() - then) / 86_400_000));
-}
 
 export default async function FinancialsPage() {
   const profile = await getSessionProfile();
@@ -45,14 +39,13 @@ export default async function FinancialsPage() {
     allPaid: m.allPaid,
   }));
 
-  // Oldest pending (status 2) invoices submitted MORE THAN A MONTH AGO.
-  const cutoff = new Date();
-  cutoff.setMonth(cutoff.getMonth() - 1);
+  // Oldest pending (status 2) invoices submitted MORE THAN A MONTH AGO,
+  // measured in the Baghdad calendar (submitted before Baghdad today − 1 month).
   const { data: pendingData } = await supabase
     .from("patients")
     .select("id, case_id, patient_erp_id, patient_name, treating_doctor, total_cost, invoice_submitted_at")
     .eq("status_code", 2)
-    .lt("invoice_submitted_at", cutoff.toISOString())
+    .lt("invoice_submitted_at", baghdadMonthsAgoCutoffISO(1))
     .order("invoice_submitted_at", { ascending: true })
     .limit(15);
   const pending = (pendingData ?? []) as {
@@ -161,7 +154,7 @@ export default async function FinancialsPage() {
               </thead>
               <tbody>
                 {pending.map((p) => {
-                  const days = daysSince(p.invoice_submitted_at);
+                  const days = daysBetweenBaghdad(p.invoice_submitted_at);
                   return (
                     <tr key={p.id} className="border-t border-black/5 dark:border-white/5 hover:bg-black/[0.02] dark:hover:bg-white/[0.03]">
                       <td className="px-4 py-2.5 whitespace-nowrap">
