@@ -13,12 +13,16 @@ export type MonthFin = {
   s3: number; // count status 3 (received)
 };
 
+/** One payment-received month (grouped by payment_received_at). */
+export type ReceivedMonth = { key: string; year: number; month: number; received: number };
+
 export type FinancialsData = {
   outstanding: number; // sum(total_cost) where status 2 (billed, not received)
   amountCollected: number; // sum(total_cost) where status 3 (received)
   submittedCount: number; // count status 2
   receivedCount: number; // count status 3
-  months: MonthFin[]; // sorted ascending
+  months: MonthFin[]; // by invoice_submitted_at, sorted ascending
+  receivedByMonth: ReceivedMonth[]; // by payment_received_at, sorted ascending
 };
 
 const num = (v: unknown) => Number(v ?? 0) || 0;
@@ -39,12 +43,18 @@ function parse(d: Record<string, unknown>): FinancialsData {
     s3: num(r.s3),
   }));
   months.sort((a, b) => a.key.localeCompare(b.key));
+
+  const receivedByMonth = ((d.received_by_month ?? []) as { y: number; m: number; received: number }[])
+    .map((r) => ({ key: monthKey(r.y, r.m), year: r.y, month: r.m - 1, received: num(r.received) }))
+    .sort((a, b) => a.key.localeCompare(b.key));
+
   return {
     outstanding: num(d.outstanding),
     amountCollected: num(d.amount_collected),
     submittedCount: num(d.submitted_count),
     receivedCount: num(d.received_count),
     months,
+    receivedByMonth,
   };
 }
 
@@ -54,10 +64,11 @@ async function fromRows(
 ): Promise<FinancialsData> {
   const { data } = await supabase
     .from("patients")
-    .select("status_code, total_cost, hospital_share, invoice_submitted_at");
+    .select("status_code, total_cost, hospital_share, invoice_submitted_at, payment_received_at");
   const rows = (data ?? []) as {
     status_code: number; total_cost: number | string | null;
     hospital_share: number | string | null; invoice_submitted_at: string | null;
+    payment_received_at: string | null;
   }[];
 
   let outstanding = 0;
@@ -65,6 +76,7 @@ async function fromRows(
   let submittedCount = 0;
   let receivedCount = 0;
   const byMonth = new Map<string, MonthFin>();
+  const recvByMonth = new Map<string, ReceivedMonth>();
 
   for (const r of rows) {
     const cost = num(r.total_cost);
@@ -84,6 +96,15 @@ async function fromRows(
       if (r.status_code === 3) cur.s3 += 1;
       byMonth.set(key, cur);
     }
+    if (r.status_code === 3 && r.payment_received_at) {
+      const dt = new Date(r.payment_received_at);
+      const y = dt.getUTCFullYear();
+      const m = dt.getUTCMonth();
+      const key = monthKey(y, m + 1);
+      const cur = recvByMonth.get(key) ?? { key, year: y, month: m, received: 0 };
+      cur.received += cost;
+      recvByMonth.set(key, cur);
+    }
   }
 
   return {
@@ -92,6 +113,7 @@ async function fromRows(
     submittedCount,
     receivedCount,
     months: Array.from(byMonth.values()).sort((a, b) => a.key.localeCompare(b.key)),
+    receivedByMonth: Array.from(recvByMonth.values()).sort((a, b) => a.key.localeCompare(b.key)),
   };
 }
 
@@ -102,4 +124,43 @@ export async function getFinancials(
   return !res.error && res.data
     ? parse(res.data as Record<string, unknown>)
     : fromRows(supabase);
+}
+
+// --- Processing time (average lifecycle durations, in days) ---------------
+
+/** Average durations; null when no case has both relevant dates. */
+export type Durations = {
+  visitToInvoice: number | null; // first visit -> invoice submitted
+  invoiceToPayment: number | null; // invoice submitted -> payment received
+  visitToPayment: number | null; // first visit -> payment received (full cycle)
+  nVi: number;
+  nIp: number;
+  nVp: number;
+};
+export type ProcessingMonth = Durations & { key: string; year: number; month: number };
+export type ProcessingTime = { overall: Durations; monthly: ProcessingMonth[] };
+
+const dur = (v: unknown) => (v == null ? null : Number(v));
+
+function parseDurations(o: Record<string, unknown> | undefined | null): Durations {
+  return {
+    visitToInvoice: dur(o?.visit_to_invoice),
+    invoiceToPayment: dur(o?.invoice_to_payment),
+    visitToPayment: dur(o?.visit_to_payment),
+    nVi: num(o?.n_vi),
+    nIp: num(o?.n_ip),
+    nVp: num(o?.n_vp),
+  };
+}
+
+export async function getProcessingTime(
+  supabase: Awaited<ReturnType<typeof createClient>>
+): Promise<ProcessingTime> {
+  const res = await supabase.rpc("processing_time_summary");
+  if (res.error || !res.data) return { overall: parseDurations(null), monthly: [] };
+  const d = res.data as Record<string, unknown>;
+  const monthly = ((d.monthly ?? []) as (Record<string, unknown> & { y: number; m: number })[])
+    .map((r) => ({ ...parseDurations(r), key: monthKey(r.y, r.m), year: r.y, month: r.m - 1 }))
+    .sort((a, b) => a.key.localeCompare(b.key));
+  return { overall: parseDurations(d.overall as Record<string, unknown>), monthly };
 }

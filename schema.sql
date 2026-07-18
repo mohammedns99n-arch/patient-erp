@@ -41,6 +41,7 @@ create table if not exists public.patients (
   revenue_insurance_due numeric(14,2) generated always as (revenue_total - revenue_patient_paid) stored,  -- always total − patient paid; never written directly
   status_code        integer not null default 0 check (status_code in (0,1,2,3)),
   invoice_submitted_at timestamptz,                               -- auto-set the first time status reaches >= 2 (invoice submitted); never cleared
+  payment_received_at  timestamptz,                               -- auto-set the first time status reaches 3 (payment received); never cleared
   first_visit_date   date        not null default (now() at time zone 'Asia/Baghdad')::date,  -- Baghdad-local date, set on create, not edited
   last_updated       timestamptz not null default now(),          -- auto on every edit
   entered_by         uuid references public.profiles(id),
@@ -56,6 +57,7 @@ create index if not exists patients_case_type_idx   on public.patients(case_type
 create index if not exists patients_first_visit_idx on public.patients(first_visit_date);
 create index if not exists patients_last_updated_idx on public.patients(last_updated desc);
 create index if not exists patients_invoice_submitted_idx on public.patients(invoice_submitted_at);
+create index if not exists patients_payment_received_idx on public.patients(payment_received_at);
 -- Composite index so the list ORDER BY (first_visit_date desc, case_id desc) is
 -- served straight from the index — no per-page sort as the table grows.
 create index if not exists patients_list_order_idx on public.patients(first_visit_date desc, case_id desc);
@@ -99,6 +101,22 @@ drop trigger if exists trg_invoice_submitted_at on public.patients;
 create trigger trg_invoice_submitted_at
   before insert or update on public.patients
   for each row execute function public.set_invoice_submitted_at();
+
+-- Stamp payment_received_at the first time a case reaches status 3.
+create or replace function public.set_payment_received_at()
+returns trigger language plpgsql as $$
+begin
+  if new.status_code >= 3 and new.payment_received_at is null then
+    new.payment_received_at := now();
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_payment_received_at on public.patients;
+create trigger trg_payment_received_at
+  before insert or update on public.patients
+  for each row execute function public.set_payment_received_at();
 
 -- ---------------------------------------------------------------------
 -- 4. Auto-create a profile row when a new auth user signs up
@@ -210,6 +228,50 @@ language sql stable security invoker set search_path = public as $$
             from public.patients
             where invoice_submitted_at is not null
             group by 1, 2) mm
+    ),
+    'received_by_month', (
+      select coalesce(jsonb_agg(
+        jsonb_build_object('y', y, 'm', m, 'received', received) order by y, m), '[]'::jsonb)
+      from (select extract(year from payment_received_at)::int y,
+                   extract(month from payment_received_at)::int m,
+                   coalesce(sum(total_cost), 0) received
+            from public.patients
+            where status_code = 3 and payment_received_at is not null
+            group by 1, 2) rm
+    )
+  );
+$$;
+
+-- Average lifecycle durations (whole days), overall + per first-visit month.
+create or replace function public.processing_time_summary()
+returns jsonb
+language sql stable security invoker set search_path = public as $$
+  select jsonb_build_object(
+    'overall', jsonb_build_object(
+      'visit_to_invoice',   (select avg(invoice_submitted_at::date - first_visit_date) from public.patients where invoice_submitted_at is not null and first_visit_date is not null),
+      'n_vi',               (select count(*) from public.patients where invoice_submitted_at is not null and first_visit_date is not null),
+      'invoice_to_payment', (select avg(payment_received_at::date - invoice_submitted_at::date) from public.patients where payment_received_at is not null and invoice_submitted_at is not null),
+      'n_ip',               (select count(*) from public.patients where payment_received_at is not null and invoice_submitted_at is not null),
+      'visit_to_payment',   (select avg(payment_received_at::date - first_visit_date) from public.patients where payment_received_at is not null and first_visit_date is not null),
+      'n_vp',               (select count(*) from public.patients where payment_received_at is not null and first_visit_date is not null)
+    ),
+    'monthly', (
+      select coalesce(jsonb_agg(jsonb_build_object('y', y, 'm', m,
+        'visit_to_invoice', vi, 'invoice_to_payment', ip, 'visit_to_payment', vp,
+        'n_vi', nvi, 'n_ip', nip, 'n_vp', nvp) order by y, m), '[]'::jsonb)
+      from (
+        select extract(year from first_visit_date)::int y,
+               extract(month from first_visit_date)::int m,
+               avg(invoice_submitted_at::date - first_visit_date) filter (where invoice_submitted_at is not null) vi,
+               avg(payment_received_at::date - invoice_submitted_at::date) filter (where payment_received_at is not null and invoice_submitted_at is not null) ip,
+               avg(payment_received_at::date - first_visit_date) filter (where payment_received_at is not null) vp,
+               count(*) filter (where invoice_submitted_at is not null) nvi,
+               count(*) filter (where payment_received_at is not null and invoice_submitted_at is not null) nip,
+               count(*) filter (where payment_received_at is not null) nvp
+        from public.patients
+        where first_visit_date is not null
+        group by 1, 2
+      ) mm
     )
   );
 $$;
