@@ -217,8 +217,8 @@ language sql stable security invoker set search_path = public as $$
           'hospital_share', hospital_share, 'all_paid', all_paid, 'count', cnt,
           's2', s2, 's3', s3)
         order by y, m), '[]'::jsonb)
-      from (select extract(year from invoice_submitted_at)::int y,
-                   extract(month from invoice_submitted_at)::int m,
+      from (select extract(year  from (invoice_submitted_at at time zone 'Asia/Baghdad'))::int y,
+                   extract(month from (invoice_submitted_at at time zone 'Asia/Baghdad'))::int m,
                    coalesce(sum(total_cost), 0) total_billed,
                    coalesce(sum(hospital_share), 0) hospital_share,
                    bool_and(status_code = 3) all_paid,
@@ -232,8 +232,8 @@ language sql stable security invoker set search_path = public as $$
     'received_by_month', (
       select coalesce(jsonb_agg(
         jsonb_build_object('y', y, 'm', m, 'received', received) order by y, m), '[]'::jsonb)
-      from (select extract(year from payment_received_at)::int y,
-                   extract(month from payment_received_at)::int m,
+      from (select extract(year  from (payment_received_at at time zone 'Asia/Baghdad'))::int y,
+                   extract(month from (payment_received_at at time zone 'Asia/Baghdad'))::int m,
                    coalesce(sum(total_cost), 0) received
             from public.patients
             where status_code = 3 and payment_received_at is not null
@@ -246,30 +246,43 @@ $$;
 create or replace function public.processing_time_summary()
 returns jsonb
 language sql stable security invoker set search_path = public as $$
+  -- Convert timestamps to the Baghdad calendar date BEFORE any date math, so a
+  -- Baghdad-evening event isn't pushed to the previous UTC day (same-day = 0).
+  -- Each per-row duration is clamped to >= 0; raw negatives are counted so the
+  -- app can flag data problems (e.g. payment recorded before invoice).
+  with base as (
+    select
+      first_visit_date as fv,
+      (invoice_submitted_at at time zone 'Asia/Baghdad')::date as inv,
+      (payment_received_at  at time zone 'Asia/Baghdad')::date as pay
+    from public.patients
+  )
   select jsonb_build_object(
     'overall', jsonb_build_object(
-      'visit_to_invoice',   (select avg(invoice_submitted_at::date - first_visit_date) from public.patients where invoice_submitted_at is not null and first_visit_date is not null),
-      'n_vi',               (select count(*) from public.patients where invoice_submitted_at is not null and first_visit_date is not null),
-      'invoice_to_payment', (select avg(payment_received_at::date - invoice_submitted_at::date) from public.patients where payment_received_at is not null and invoice_submitted_at is not null),
-      'n_ip',               (select count(*) from public.patients where payment_received_at is not null and invoice_submitted_at is not null),
-      'visit_to_payment',   (select avg(payment_received_at::date - first_visit_date) from public.patients where payment_received_at is not null and first_visit_date is not null),
-      'n_vp',               (select count(*) from public.patients where payment_received_at is not null and first_visit_date is not null)
+      'visit_to_invoice',   (select avg(greatest(0, inv - fv)) from base where inv is not null and fv is not null),
+      'n_vi',               (select count(*) from base where inv is not null and fv is not null),
+      'invoice_to_payment', (select avg(greatest(0, pay - inv)) from base where pay is not null and inv is not null),
+      'n_ip',               (select count(*) from base where pay is not null and inv is not null),
+      'visit_to_payment',   (select avg(greatest(0, pay - fv)) from base where pay is not null and fv is not null),
+      'n_vp',               (select count(*) from base where pay is not null and fv is not null),
+      'neg_vi', (select count(*) from base where inv is not null and fv is not null  and inv - fv < 0),
+      'neg_ip', (select count(*) from base where pay is not null and inv is not null and pay - inv < 0),
+      'neg_vp', (select count(*) from base where pay is not null and fv is not null  and pay - fv < 0)
     ),
     'monthly', (
       select coalesce(jsonb_agg(jsonb_build_object('y', y, 'm', m,
         'visit_to_invoice', vi, 'invoice_to_payment', ip, 'visit_to_payment', vp,
         'n_vi', nvi, 'n_ip', nip, 'n_vp', nvp) order by y, m), '[]'::jsonb)
       from (
-        select extract(year from first_visit_date)::int y,
-               extract(month from first_visit_date)::int m,
-               avg(invoice_submitted_at::date - first_visit_date) filter (where invoice_submitted_at is not null) vi,
-               avg(payment_received_at::date - invoice_submitted_at::date) filter (where payment_received_at is not null and invoice_submitted_at is not null) ip,
-               avg(payment_received_at::date - first_visit_date) filter (where payment_received_at is not null) vp,
-               count(*) filter (where invoice_submitted_at is not null) nvi,
-               count(*) filter (where payment_received_at is not null and invoice_submitted_at is not null) nip,
-               count(*) filter (where payment_received_at is not null) nvp
-        from public.patients
-        where first_visit_date is not null
+        select extract(year from fv)::int y, extract(month from fv)::int m,
+               avg(greatest(0, inv - fv)) filter (where inv is not null) vi,
+               avg(greatest(0, pay - inv)) filter (where pay is not null and inv is not null) ip,
+               avg(greatest(0, pay - fv)) filter (where pay is not null) vp,
+               count(*) filter (where inv is not null) nvi,
+               count(*) filter (where pay is not null and inv is not null) nip,
+               count(*) filter (where pay is not null) nvp
+        from base
+        where fv is not null
         group by 1, 2
       ) mm
     )

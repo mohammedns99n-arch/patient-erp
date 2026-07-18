@@ -20,8 +20,11 @@ export async function financialsMonthNames(
   if (![2, 3].includes(status)) return { rows: [], error: "Invalid status." };
 
   const supabase = await createClient();
-  const start = new Date(Date.UTC(year, month, 1)).toISOString();
-  const end = new Date(Date.UTC(year, month + 1, 1)).toISOString();
+  // Baghdad (UTC+3, no DST) month boundaries as UTC instants, so the range
+  // matches how financials_summary buckets invoice_submitted_at by Baghdad month.
+  const BAGHDAD_OFFSET_MS = 3 * 60 * 60 * 1000;
+  const start = new Date(Date.UTC(year, month, 1) - BAGHDAD_OFFSET_MS).toISOString();
+  const end = new Date(Date.UTC(year, month + 1, 1) - BAGHDAD_OFFSET_MS).toISOString();
 
   const { data, error } = await supabase
     .from("patients")

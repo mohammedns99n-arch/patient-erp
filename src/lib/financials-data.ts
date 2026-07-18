@@ -28,6 +28,14 @@ export type FinancialsData = {
 const num = (v: unknown) => Number(v ?? 0) || 0;
 const monthKey = (y: number, m: number) => `${y}-${String(m).padStart(2, "0")}`;
 
+// Baghdad is a fixed UTC+3 (Iraq has no DST). Bucket a UTC timestamp by its
+// Baghdad calendar month so it matches the SQL (`at time zone 'Asia/Baghdad'`).
+const BAGHDAD_OFFSET_MS = 3 * 60 * 60 * 1000;
+function baghdadYM(iso: string): { y: number; m: number } {
+  const dt = new Date(Date.parse(iso) + BAGHDAD_OFFSET_MS);
+  return { y: dt.getUTCFullYear(), m: dt.getUTCMonth() };
+}
+
 function parse(d: Record<string, unknown>): FinancialsData {
   const months = ((d.months ?? []) as {
     y: number; m: number; total_billed: number; hospital_share: number; all_paid: boolean; count: number; s2: number; s3: number;
@@ -83,9 +91,7 @@ async function fromRows(
     if (r.status_code === 2) { outstanding += cost; submittedCount += 1; }
     if (r.status_code === 3) { amountCollected += cost; receivedCount += 1; }
     if (r.invoice_submitted_at) {
-      const dt = new Date(r.invoice_submitted_at);
-      const y = dt.getUTCFullYear();
-      const m = dt.getUTCMonth();
+      const { y, m } = baghdadYM(r.invoice_submitted_at);
       const key = monthKey(y, m + 1);
       const cur = byMonth.get(key) ?? { key, year: y, month: m, totalBilled: 0, hospitalShare: 0, allPaid: true, count: 0, s2: 0, s3: 0 };
       cur.totalBilled += cost;
@@ -97,9 +103,7 @@ async function fromRows(
       byMonth.set(key, cur);
     }
     if (r.status_code === 3 && r.payment_received_at) {
-      const dt = new Date(r.payment_received_at);
-      const y = dt.getUTCFullYear();
-      const m = dt.getUTCMonth();
+      const { y, m } = baghdadYM(r.payment_received_at);
       const key = monthKey(y, m + 1);
       const cur = recvByMonth.get(key) ?? { key, year: y, month: m, received: 0 };
       cur.received += cost;
@@ -140,7 +144,19 @@ export type Durations = {
 export type ProcessingMonth = Durations & { key: string; year: number; month: number };
 export type ProcessingTime = { overall: Durations; monthly: ProcessingMonth[] };
 
-const dur = (v: unknown) => (v == null ? null : Number(v));
+// Guard: a duration can never be negative. If one somehow computes below 0
+// (the DB already clamps per row), treat it as 0 and log it so we can spot
+// data problems.
+const dur = (v: unknown) => {
+  if (v == null) return null;
+  const n = Number(v);
+  if (!Number.isFinite(n)) return null;
+  if (n < 0) {
+    console.warn(`[processing-time] negative duration ${n} clamped to 0`);
+    return 0;
+  }
+  return n;
+};
 
 function parseDurations(o: Record<string, unknown> | undefined | null): Durations {
   return {
@@ -159,6 +175,19 @@ export async function getProcessingTime(
   const res = await supabase.rpc("processing_time_summary");
   if (res.error || !res.data) return { overall: parseDurations(null), monthly: [] };
   const d = res.data as Record<string, unknown>;
+
+  // Surface genuine data problems: the DB clamps negative durations to 0 for the
+  // averages but reports how many raw negatives it saw (e.g. payment before
+  // invoice, or a first_visit_date after the invoice date).
+  const o = (d.overall ?? {}) as Record<string, unknown>;
+  const negVi = num(o.neg_vi), negIp = num(o.neg_ip), negVp = num(o.neg_vp);
+  if (negVi || negIp || negVp) {
+    console.warn(
+      `[processing-time] negative raw durations detected (clamped to 0) — possible data issue: ` +
+      `visit→invoice=${negVi}, invoice→payment=${negIp}, visit→payment=${negVp}`
+    );
+  }
+
   const monthly = ((d.monthly ?? []) as (Record<string, unknown> & { y: number; m: number })[])
     .map((r) => ({ ...parseDurations(r), key: monthKey(r.y, r.m), year: r.y, month: r.m - 1 }))
     .sort((a, b) => a.key.localeCompare(b.key));
